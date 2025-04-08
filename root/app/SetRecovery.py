@@ -1,0 +1,226 @@
+import requests
+import string
+import time
+import re
+import logging
+import os
+import random
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+# Configure logging
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+numeric_level = getattr(logging, log_level, None)
+if not isinstance(numeric_level, int):
+	raise ValueError(f'Invalid log level: {log_level}')
+logging.basicConfig(level=numeric_level, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class Computer:
+	def __init__(self, id, name, management_id, recovery_password=None):
+		self.id = id
+		self.name = name
+		self.management_id = management_id
+		self.recovery_password = recovery_password
+	
+	def generateRandomPassword(self):
+		logging.debug('Generating new password...')
+		self.recovery_password = ''.join(random.SystemRandom().choice(string.ascii_uppercase) for _ in range(10))
+		
+
+class StateDatabase:
+	def __init__(self):
+		self._database = sqlite3.connect('/Users/lmatthews/config/state.db')
+		self.cursor = self._database.cursor()
+		self.cursor.execute('''
+					  CREATE TABLE IF NOT EXISTS state (
+					  id INTEGER PRIMARY KEY,
+					  password TEXT,
+					  date TEXT NOT NULL
+					  );
+		''')
+	
+	def get_all(self):
+		rows = self.cursor.execute("SELECT id, password, date FROM state").fetchall()
+		if len(rows) == 0:
+			return None
+		else:
+			return rows
+	
+	def get(self, computer):
+		password, date = self.cursor.execute('SELECT password, date FROM state WHERE id = ?', (computer.id,)).fetchone()
+		return (password, date)
+		
+	def create(self, computer):
+		self.cursor.execute('INSERT INTO state (id, password, date) VALUES (?, ?, ?)', (computer.id, computer.recovery_password, datetime.today().timestamp()))
+		self._database.commit()
+
+	def update(self, computer):
+		self.cursor.execute('UPDATE state SET password = ?, date = ? WHERE id = ?', (computer.recovery_password, datetime.today().timestamp(), computer.id))	
+		self._database.commit()
+
+	def touch(self, computer):
+		self.cursor.execute('UPDATE state SET date = ? WHERE id = ?', (datetime.today().timestamp(), computer.id))
+		self._database.commit()
+
+	def clear(self, computer):
+		self.cursor.execute('UPDATE state SET password = \'\' WHERE id = ?', (computer.id))
+		self._database.commit()
+
+class SetRecoveryLock:
+	def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, dry_run):
+		self.jamf_host = jamf_host
+		self.jamf_client_id = jamf_client_id
+		self.jamf_client_secret = jamf_client_secret
+		self.dry_run = dry_run
+		self.database = StateDatabase()
+		self.__authenticate_jamf_API__()
+		logging.info('Initiliazed service')
+
+	def __authenticate_jamf_API__(self):
+		logging.debug('Authenticating to Jamf API...')
+		headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+		data = {
+			'client_id': self.jamf_client_id,
+			'client_secret': self.jamf_client_secret,
+			'grant_type': 'client_credentials'
+		}
+		response = requests.post(f'https://{self.jamf_host}/api/oauth/token', headers=headers, data=data)
+		response.raise_for_status()
+		self.jamf_access_token = response.json()['access_token']
+		self.jamf_token_expiry = datetime.now(timezone.utc) + timedelta(seconds=response.json()['expires_in'])
+		logging.debug('Successfully retrieved an access token')
+	
+	def __check_token__(self):
+		logging.debug('Checking access token expiry...')
+		if datetime.now(timezone.utc) >= self.jamf_token_expiry:
+			logging.info('Access token expired, re-authenticating...')
+			self.__authenticate_jamf_API__()
+		else:
+			logging.debug('Access token fine')
+	
+	def getAllmacOSDevices(self):
+		self.__check_token__()
+
+		logging.info('Getting all macOS devices from Jamf...')
+		devices = []
+
+		headers = {
+			'Accept': 'application/json',
+			'Authorization': f'Bearer {self.jamf_access_token}'
+		}
+
+		query = {
+			'section': [
+				'GENERAL'
+			],
+			'page-size': 5000,
+			'filter': 'general.remoteManagement.managed==true'
+		}
+
+		response = requests.get(f'https://{self.jamf_host}/api/v1/computers-inventory', params=query, headers=headers)
+		response.raise_for_status()
+
+		for device in response.json()['results']:
+			computer = Computer(device['id'], device['general']['name'], device['general']['managementId'])
+			devices.append(computer)
+		
+		return devices
+	
+	def getCurrentRecoveryPassword(self, computer):
+		self.__check_token__()
+
+		logging.debug(f'Getting current recovery lock password for computer {computer.id}')
+
+		headers = {
+			'Accept': 'application/json',
+			'Authorization': f'Bearer {self.jamf_access_token}'
+		}
+
+		response = requests.get(f'https://{self.jamf_host}/api/v1/computers-inventory/{computer.id}/view-recovery-lock-password', headers=headers)
+		if response.status_code == 404:
+			logging.info(f'Computer {computer.id} does not have a current recovery pass')
+			computer.current_recovery_password = None
+		else:
+			response.raise_for_status()
+			computer.current_recovery_password = response.json()['recoveryLockPassword']
+
+
+	def setNewRecoveryPassword(self, computer):
+		self.__check_token__()
+
+		logging.debug(f'Setting new recovery lock password for computer {computer.id}')
+
+		headers = {
+			'Content-Type': 'application/json',
+			'Authorization': f'Bearer {self.jamf_access_token}'
+		}
+
+		payload = {
+			'clientData': [
+				{
+					'managementId': computer.management_id
+				}
+			],
+			'commandData': {
+				'commandType': 'SET_RECOVERY_LOCK',
+				'newPassword': computer.recovery_password
+			}
+		}
+
+		if not self.dry_run:
+			response = requests.post(f'https://{self.jamf_host}/api/v2/mdm/commands', headers=headers, json=payload)
+			response.raise_for_status()
+			logging.info(f'Recovery password set for computer {computer.id} successfully')
+		else:
+			logging.debug(f'DRY RUN: Would have set password for {computer.name} to {computer.recovery_password}')
+
+	
+	def update(self):
+		self.__check_token__()
+
+		devices = self.getAllmacOSDevices()
+
+		for device in devices:
+			try:
+				password, date = self.database.get(device)
+				if password != None:
+					if self.getCurrentRecoveryPassword(device) != password:
+						self.database.touch(device)
+					else:
+						self.database.clear(device)
+				elif date < datetime.now(timezone.utc) - timedelta(days=31):
+					device.generateRandomPassword()
+					self.setNewRecoveryPassword(device)
+					self.database.update(device)
+			except TypeError:
+				device.generateRandomPassword()
+				self.setNewRecoveryPassword(device)
+				self.database.create(device)
+	
+def main():
+	logging.info('Script started')
+	jamf_client_id = os.getenv('JAMF_CLIENT_ID', '')
+	jamf_client_secret = os.getenv('JAMF_CLIENT_SECRET', '')
+	jamf_host = os.getenv('JAMF_HOST')
+	update_now = os.getenv('UPDATE_NOW', 'false').lower() == 'true'
+	dry_run = os.getenv('DRY_RUN', 'false').lower() == 'true'
+	update = SetRecoveryLock(jamf_host, jamf_client_id, jamf_client_secret, dry_run)
+	if update_now:
+		logging.info('Running update immediately due to UPDATE_NOW setting')
+		update.update()
+	cron_schedule = os.getenv('UPDATE_SCHEDULE', '0 0 * * *')
+	scheduler = BackgroundScheduler()
+	scheduler.add_job(update.update, CronTrigger.from_crontab(cron_schedule))
+	scheduler.start()
+	logging.info(f'Scheduled update with cron: {cron_schedule}')
+	try:
+		while True:
+			time.sleep(10)
+	except (KeyboardInterrupt, SystemExit):
+		logging.info('Scheduler shutdown initiated')
+		scheduler.shutdown()
+
+if __name__ == '__main__':
+	main()
