@@ -31,7 +31,7 @@ class Computer:
 
 class StateDatabase:
 	def __init__(self):
-		self._database = sqlite3.connect('/Users/lmatthews/config/state.db')
+		self._database = sqlite3.connect('/config/state.db')
 		self.cursor = self._database.cursor()
 		self.cursor.execute('''
 					  CREATE TABLE IF NOT EXISTS state (
