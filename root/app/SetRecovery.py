@@ -65,7 +65,7 @@ class StateDatabase:
 		self._database.commit()
 
 	def clear(self, computer):
-		self.cursor.execute('UPDATE state SET password = \'\' WHERE id = ?', (computer.id))
+		self.cursor.execute('UPDATE state SET password = \'\' WHERE id = ?', (computer.id,))
 		self._database.commit()
 
 	def close(self):
@@ -145,11 +145,10 @@ class SetRecoveryLock:
 
 		response = requests.get(f'https://{self.jamf_host}/api/v1/computers-inventory/{computer.id}/view-recovery-lock-password', headers=headers)
 		if response.status_code == 404:
-			logging.info(f'Computer {computer.id} does not have a current recovery pass')
-			computer.current_recovery_password = None
+			return None
 		else:
 			response.raise_for_status()
-			computer.current_recovery_password = response.json()['recoveryLockPassword']
+			return response.json()['recoveryLockPassword']
 
 
 	def setNewRecoveryPassword(self, computer):
@@ -193,7 +192,11 @@ class SetRecoveryLock:
 				password, date = self.database.get(device)
 				if password != None:
 					logging.debug(f'Password for {device.id} is still in database, comparing to one in Jamf...')
-					if self.getCurrentRecoveryPassword(device) != password:
+					jamf_recovery_password = self.getCurrentRecoveryPassword(device)
+					if jamf_recovery_password == None:
+						logging.debug(f'No password stored in Jamf for {device.id}, extending expiration until the password appears in the record...')
+						self.database.touch(device)
+					elif jamf_recovery_password != password:
 						logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
 						self.database.touch(device)
 					else:
