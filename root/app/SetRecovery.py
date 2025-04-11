@@ -189,17 +189,23 @@ class SetRecoveryLock:
 
 		for device in devices:
 			try:
+				logging.debug(f'Getting information for {device.id} from local database')
 				password, date = self.database.get(device)
 				if password != None:
+					logging.debug(f'Password for {device.id} is still in database, comparing to one in Jamf...')
 					if self.getCurrentRecoveryPassword(device) != password:
+						logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
 						self.database.touch(device)
 					else:
+						logging.debug(f'Password for {device.id} matches Jamf\'s, clearing record in local database...')
 						self.database.clear(device)
 				elif date < datetime.now(timezone.utc) - timedelta(days=31):
+					logging.info(f'Password for {device.id} has expired, setting new one...')
 					device.generateRandomPassword()
 					self.setNewRecoveryPassword(device)
 					self.database.update(device)
 			except TypeError:
+				logging.info(f'No record in local database for {device.id}, setting new password and creating record...')
 				device.generateRandomPassword()
 				self.setNewRecoveryPassword(device)
 				self.database.create(device)
