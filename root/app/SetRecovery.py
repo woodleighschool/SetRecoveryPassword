@@ -68,6 +68,11 @@ class StateDatabase:
 		self.cursor.execute('UPDATE state SET password = \'\' WHERE id = ?', (computer.id))
 		self._database.commit()
 
+	def close(self):
+		self._database.commit()
+		self.cursor.close()
+		self._database.close()
+
 class SetRecoveryLock:
 	def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, dry_run):
 		self.jamf_host = jamf_host
@@ -198,6 +203,8 @@ class SetRecoveryLock:
 				device.generateRandomPassword()
 				self.setNewRecoveryPassword(device)
 				self.database.create(device)
+		
+		self.database.close()
 	
 def main():
 	logging.info('Script started')
