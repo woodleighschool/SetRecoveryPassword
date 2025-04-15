@@ -41,6 +41,10 @@ class StateDatabase:
 					  );
 		''')
 	
+	def reinit(self):
+		self._database = sqlite3.connect('/config/state.db')
+		self.cursor = self._database.cursor()
+
 	def get_all(self):
 		rows = self.cursor.execute("SELECT id, password, date FROM state").fetchall()
 		if len(rows) == 0:
@@ -104,6 +108,15 @@ class SetRecoveryLock:
 			self.__authenticate_jamf_API__()
 		else:
 			logging.debug('Access token fine')
+	
+	def __check_cursor__(self):
+		logging.debug('Checking if local database cursor is still available...')
+		try:
+			logging.debug('Cursor fine')
+			self.database.get_all()
+		except sqlite3.ProgrammingError:
+			logging.debug('Cursor object closed, creating new...')
+			self.database.reinit()
 	
 	def getAllmacOSDevices(self):
 		self.__check_token__()
@@ -183,6 +196,7 @@ class SetRecoveryLock:
 	
 	def update(self):
 		self.__check_token__()
+		self.__check_cursor__()
 
 		devices = self.getAllmacOSDevices()
 
