@@ -32,7 +32,7 @@ class Computer:
 class OnePasswordIntegration:
 	def __init__(self):
 		self.vault_id = os.getenv('VAULT_ID')
-		self.client = Client.authenticate('ONEPASSWORD_TOKEN')
+		self.client = Client.authenticate(auth='ONEPASSWORD_TOKEN', integration_name="SetRecoveryPassword", integration_version="1.0.0")
 	
 	def create(self, computer, password):
 		params = ItemCreateParams(
@@ -108,7 +108,7 @@ class StateDatabase:
 		self._database.close()
 
 class SetRecoveryLock:
-	def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, onePassToken, dry_run):
+	def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, dry_run):
 		self.jamf_host = jamf_host
 		self.jamf_client_id = jamf_client_id
 		self.jamf_client_secret = jamf_client_secret
