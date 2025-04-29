@@ -6,6 +6,7 @@ import logging
 import os
 import random
 import sqlite3
+from onepassword import *
 from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -27,7 +28,35 @@ class Computer:
 	def generateRandomPassword(self):
 		logging.debug('Generating new password...')
 		self.recovery_password = ''.join(random.SystemRandom().choice(string.ascii_uppercase) for _ in range(10))
-		
+
+class OnePasswordIntegration:
+	def __init__(self):
+		self.vault_id = os.getenv('VAULT_ID')
+		self.client = Client.authenticate('ONEPASSWORD_TOKEN')
+	
+	def create(self, computer, password):
+		params = ItemCreateParams(
+			title=f'{computer.name} ({computer.id}) - Recovery Password',
+			category=ItemCategory.Password,
+			vault_id=self.vault_id,
+			fields=[
+				ItemField(
+					id="password",
+					title="password",
+					field_type=ItemFieldType.CONCEALED,
+					value=password
+				)
+			]
+		)
+
+		created_item = self.client.items.create(params)
+		return created_item.id
+
+	def update(self, uuid, password):
+		item = self.client.items.get(self.vault_id, uuid)
+		item.field[0].value = password
+		self.client.items.put(item)
+
 
 class StateDatabase:
 	def __init__(self):
@@ -37,6 +66,7 @@ class StateDatabase:
 					  CREATE TABLE IF NOT EXISTS state (
 					  id INTEGER PRIMARY KEY,
 					  password TEXT,
+					  password_uuid TEXT,
 					  date TEXT NOT NULL
 					  );
 		''')
@@ -46,15 +76,15 @@ class StateDatabase:
 		self.cursor = self._database.cursor()
 
 	def get_all(self):
-		rows = self.cursor.execute("SELECT id, password, date FROM state").fetchall()
+		rows = self.cursor.execute("SELECT id, password, password_uuid, date FROM state").fetchall()
 		if len(rows) == 0:
 			return None
 		else:
 			return rows
 	
 	def get(self, computer):
-		password, date = self.cursor.execute('SELECT password, date FROM state WHERE id = ?', (computer.id,)).fetchone()
-		return (password, date)
+		password, password_uuid, date = self.cursor.execute('SELECT password, password_uuid, date FROM state WHERE id = ?', (computer.id,)).fetchone()
+		return (password, password_uuid, date)
 		
 	def create(self, computer):
 		self.cursor.execute('INSERT INTO state (id, password, date) VALUES (?, ?, ?)', (computer.id, computer.recovery_password, datetime.today().timestamp()))
@@ -68,8 +98,8 @@ class StateDatabase:
 		self.cursor.execute('UPDATE state SET date = ? WHERE id = ?', (datetime.today().timestamp(), computer.id))
 		self._database.commit()
 
-	def clear(self, computer):
-		self.cursor.execute('UPDATE state SET password = \'\' WHERE id = ?', (computer.id,))
+	def migrate(self, computer, password_uuid):
+		self.cursor.execute('UPDATE state SET password = \'\', password_uuid = ? WHERE id = ?', (password_uuid, computer.id))
 		self._database.commit()
 
 	def close(self):
@@ -78,11 +108,12 @@ class StateDatabase:
 		self._database.close()
 
 class SetRecoveryLock:
-	def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, dry_run):
+	def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, onePassToken, dry_run):
 		self.jamf_host = jamf_host
 		self.jamf_client_id = jamf_client_id
 		self.jamf_client_secret = jamf_client_secret
 		self.dry_run = dry_run
+		self.onePassword = OnePasswordIntegration()
 		self.database = StateDatabase()
 		self.__authenticate_jamf_API__()
 		logging.info('Initiliazed service')
@@ -193,7 +224,15 @@ class SetRecoveryLock:
 		else:
 			logging.debug(f'DRY RUN: Would have set password for {computer.name} to {computer.recovery_password}')
 
-	
+	def moveFromDatabaseToOnePassword(self, computer, password):
+		self.__check_cursor__()
+
+		if (uuid := self.database.get(computer)) is not None:
+			self.onePassword.update(uuid, password)
+		else:
+			uuid = self.onePassword.create(computer, password)
+		self.database.migrate(computer, uuid)
+
 	def update(self):
 		self.__check_token__()
 		self.__check_cursor__()
@@ -214,8 +253,8 @@ class SetRecoveryLock:
 						logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
 						self.database.touch(device)
 					else:
-						logging.debug(f'Password for {device.id} matches Jamf\'s, clearing record in local database...')
-						self.database.clear(device)
+						logging.debug(f'Password for {device.id} matches Jamf\'s, moving password from local database into 1Password')
+						self.moveFromDatabaseToOnePassword(device, password)
 				elif date < datetime.now(timezone.utc) - timedelta(days=31):
 					logging.info(f'Password for {device.id} has expired, setting new one...')
 					device.generateRandomPassword()
