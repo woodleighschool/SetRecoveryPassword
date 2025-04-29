@@ -6,6 +6,7 @@ import logging
 import os
 import random
 import sqlite3
+import asyncio
 from onepassword import *
 from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -32,12 +33,15 @@ class Computer:
 class OnePasswordIntegration:
 	def __init__(self):
 		self.vault_id = os.getenv('VAULT_ID')
-		self.client = Client.authenticate(auth='ONEPASSWORD_TOKEN', integration_name="SetRecoveryPassword", integration_version="1.0.0")
+		self.auth = os.getenv('ONEPASSWORD_TOKEN')
 	
-	def create(self, computer, password):
+	async def authenticate(self):
+		self.client = await Client.authenticate(auth=self.auth, integration_name="SetRecoveryPassword", integration_version="1.0.0")
+
+	async def create(self, computer, password):
 		params = ItemCreateParams(
 			title=f'{computer.name} ({computer.id}) - Recovery Password',
-			category=ItemCategory.Password,
+			category=ItemCategory.PASSWORD,
 			vault_id=self.vault_id,
 			fields=[
 				ItemField(
@@ -49,18 +53,18 @@ class OnePasswordIntegration:
 			]
 		)
 
-		created_item = self.client.items.create(params)
+		created_item = await self.client.items.create(params)
 		return created_item.id
 
-	def update(self, uuid, password):
-		item = self.client.items.get(self.vault_id, uuid)
+	async def update(self, uuid, password):
+		item = await self.client.items.get(self.vault_id, uuid)
 		item.field[0].value = password
-		self.client.items.put(item)
+		await self.client.items.put(item)
 
 
 class StateDatabase:
 	def __init__(self):
-		self._database = sqlite3.connect('/config/state.db')
+		self._database = sqlite3.connect('/Users/lmatthews/config/state.db')
 		self.cursor = self._database.cursor()
 		self.cursor.execute('''
 					  CREATE TABLE IF NOT EXISTS state (
@@ -83,8 +87,12 @@ class StateDatabase:
 			return rows
 	
 	def get(self, computer):
-		password, password_uuid, date = self.cursor.execute('SELECT password, password_uuid, date FROM state WHERE id = ?', (computer.id,)).fetchone()
-		return (password, password_uuid, date)
+		password, date = self.cursor.execute('SELECT password, date FROM state WHERE id = ?', (computer.id,)).fetchone()
+		return (password, date)
+
+	def get_uuid(self, computer):
+		password_uuid, = self.cursor.execute('SELECT password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
+		return password_uuid
 		
 	def create(self, computer):
 		self.cursor.execute('INSERT INTO state (id, password, date) VALUES (?, ?, ?)', (computer.id, computer.recovery_password, datetime.today().timestamp()))
@@ -134,7 +142,7 @@ class SetRecoveryLock:
 	
 	def __check_token__(self):
 		logging.debug('Checking access token expiry...')
-		if datetime.now(timezone.utc) >= self.jamf_token_expiry:
+		if datetime.now(timezone.utc) >= self.jamf_token_expiry - timedelta(seconds=10):
 			logging.info('Access token expired, re-authenticating...')
 			self.__authenticate_jamf_API__()
 		else:
@@ -148,6 +156,9 @@ class SetRecoveryLock:
 		except sqlite3.ProgrammingError:
 			logging.debug('Cursor object closed, creating new...')
 			self.database.reinit()
+	
+	async def __auth_onepassword__(self):
+		await self.onePassword.authenticate()
 	
 	def getAllmacOSDevices(self):
 		self.__check_token__()
@@ -224,18 +235,19 @@ class SetRecoveryLock:
 		else:
 			logging.debug(f'DRY RUN: Would have set password for {computer.name} to {computer.recovery_password}')
 
-	def moveFromDatabaseToOnePassword(self, computer, password):
+	async def moveFromDatabaseToOnePassword(self, computer, password):
 		self.__check_cursor__()
 
-		if (uuid := self.database.get(computer)) is not None:
-			self.onePassword.update(uuid, password)
+		if (uuid := self.database.get_uuid(computer)) is not None:
+			await self.onePassword.update(uuid, password)
 		else:
-			uuid = self.onePassword.create(computer, password)
+			uuid = await self.onePassword.create(computer, password)
 		self.database.migrate(computer, uuid)
 
-	def update(self):
+	async def update(self):
 		self.__check_token__()
 		self.__check_cursor__()
+		await self.__auth_onepassword__()
 
 		devices = self.getAllmacOSDevices()
 
@@ -254,7 +266,7 @@ class SetRecoveryLock:
 						self.database.touch(device)
 					else:
 						logging.debug(f'Password for {device.id} matches Jamf\'s, moving password from local database into 1Password')
-						self.moveFromDatabaseToOnePassword(device, password)
+						await self.moveFromDatabaseToOnePassword(device, password)
 				elif date < datetime.now(timezone.utc) - timedelta(days=31):
 					logging.info(f'Password for {device.id} has expired, setting new one...')
 					device.generateRandomPassword()
@@ -268,7 +280,7 @@ class SetRecoveryLock:
 		
 		self.database.close()
 	
-def main():
+async def main():
 	logging.info('Script started')
 	jamf_client_id = os.getenv('JAMF_CLIENT_ID', '')
 	jamf_client_secret = os.getenv('JAMF_CLIENT_SECRET', '')
@@ -278,7 +290,7 @@ def main():
 	update = SetRecoveryLock(jamf_host, jamf_client_id, jamf_client_secret, dry_run)
 	if update_now:
 		logging.info('Running update immediately due to UPDATE_NOW setting')
-		update.update()
+		await update.update()
 	cron_schedule = os.getenv('UPDATE_SCHEDULE', '0 0 * * *')
 	scheduler = BackgroundScheduler()
 	scheduler.add_job(update.update, CronTrigger.from_crontab(cron_schedule))
@@ -292,4 +304,4 @@ def main():
 		scheduler.shutdown()
 
 if __name__ == '__main__':
-	main()
+	asyncio.run(main())
