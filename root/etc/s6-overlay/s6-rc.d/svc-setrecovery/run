@@ -2,4 +2,4 @@
 
 exec \
     s6-setuidgid abc \
-        python3 /app/SetRecovery.py
+        /venv/bin/python3 /app/SetRecovery.py

@@ -9,7 +9,7 @@ import sqlite3
 import asyncio
 from onepassword import *
 from datetime import datetime, timedelta, timezone
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler 
 from apscheduler.triggers.cron import CronTrigger
 
 # Configure logging
@@ -64,7 +64,7 @@ class OnePasswordIntegration:
 
 class StateDatabase:
 	def __init__(self):
-		self._database = sqlite3.connect('/Users/lmatthews/config/state.db')
+		self._database = sqlite3.connect('/config/state.db')
 		self.cursor = self._database.cursor()
 		self.cursor.execute('''
 					  CREATE TABLE IF NOT EXISTS state (
@@ -292,7 +292,7 @@ async def main():
 		logging.info('Running update immediately due to UPDATE_NOW setting')
 		await update.update()
 	cron_schedule = os.getenv('UPDATE_SCHEDULE', '0 0 * * *')
-	scheduler = BackgroundScheduler()
+	scheduler = AsyncIOScheduler()
 	scheduler.add_job(update.update, CronTrigger.from_crontab(cron_schedule))
 	scheduler.start()
 	logging.info(f'Scheduled update with cron: {cron_schedule}')
