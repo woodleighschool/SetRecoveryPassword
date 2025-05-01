@@ -297,10 +297,13 @@ async def main():
 	scheduler.start()
 	logging.info(f'Scheduled update with cron: {cron_schedule}')
 	try:
-		asyncio.get_event_loop().run_forever()
+		while True:
+			await asyncio.sleep(10)
 	except (KeyboardInterrupt, SystemExit):
 		logging.info('Scheduler shutdown initiated')
 		scheduler.shutdown()
 
 if __name__ == '__main__':
-	asyncio.run(main())
+	loop = asyncio.get_event_loop()
+	loop.create_task(main())
+	loop.run_forever()
