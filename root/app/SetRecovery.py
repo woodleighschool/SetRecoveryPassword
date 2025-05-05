@@ -87,8 +87,8 @@ class StateDatabase:
 			return rows
 	
 	def get(self, computer):
-		password, date = self.cursor.execute('SELECT password, date FROM state WHERE id = ?', (computer.id,)).fetchone()
-		return (password, date)
+		password, date, password_uuid = self.cursor.execute('SELECT password, dat, password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
+		return (password, date, password_uuid)
 
 	def get_uuid(self, computer):
 		password_uuid, = self.cursor.execute('SELECT password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
@@ -108,6 +108,10 @@ class StateDatabase:
 
 	def migrate(self, computer, password_uuid):
 		self.cursor.execute('UPDATE state SET password = \'\', password_uuid = ? WHERE id = ?', (password_uuid, computer.id))
+		self._database.commit()
+
+	def decay(self, computer, date):
+		self.cursor.execute('UPDATE state SET date = ? WHERE id = ?', (date, computer.id))
 		self._database.commit()
 
 	def close(self):
@@ -254,7 +258,7 @@ class SetRecoveryLock:
 		for device in devices:
 			try:
 				logging.debug(f'Getting information for {device.id} from local database')
-				password, date = self.database.get(device)
+				password, date, password_uuid = self.database.get(device)
 				if password != None:
 					logging.debug(f'Password for {device.id} is still in database, comparing to one in Jamf...')
 					jamf_recovery_password = self.getCurrentRecoveryPassword(device)
@@ -267,6 +271,12 @@ class SetRecoveryLock:
 					else:
 						logging.debug(f'Password for {device.id} matches Jamf\'s, moving password from local database into 1Password')
 						await self.moveFromDatabaseToOnePassword(device, password)
+				elif password == None and password_uuid == None:
+					logging.warning(f"Database state for {device.id} has gotten into an abnormal state, grabbing password from Jamf putting it into 1Password and setting to short reset time")
+					jamf_recovery_password = self.getCurrentRecoveryPassword(device)
+					date = self.getRandomResetTime()
+					await self.moveFromDatabaseToOnePassword(device, jamf_recovery_password)
+					self.database.decay(device, date)
 				elif date < datetime.now(timezone.utc) - timedelta(days=31):
 					logging.info(f'Password for {device.id} has expired, setting new one...')
 					device.generateRandomPassword()
@@ -280,6 +290,13 @@ class SetRecoveryLock:
 		
 		self.database.close()
 	
+	@staticmethod
+	def getRandomResetTime():
+		baseTime = datetime.now(timezone.utc) + timedelta(days=3)
+		modifier = timedelta(hours=random.randint(-48,48))
+		resetTime = baseTime + modifier
+		return resetTime
+
 async def main():
 	logging.info('Script started')
 	jamf_client_id = os.getenv('JAMF_CLIENT_ID', '')
