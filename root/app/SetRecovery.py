@@ -87,7 +87,9 @@ class StateDatabase:
 			return rows
 	
 	def get(self, computer):
-		password, date, password_uuid = self.cursor.execute('SELECT password, date, password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
+		raw_password, raw_date, password_uuid = self.cursor.execute('SELECT password, date, password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
+		password = None if raw_password == '' else raw_password
+		date = float(raw_date)
 		return (password, date, password_uuid)
 
 	def get_uuid(self, computer):
@@ -277,7 +279,7 @@ class SetRecoveryLock:
 					date = self.getRandomResetTime()
 					await self.moveFromDatabaseToOnePassword(device, jamf_recovery_password)
 					self.database.decay(device, date)
-				elif date < datetime.now(timezone.utc) - timedelta(days=31):
+				elif datetime.fromtimestamp(date, tz=timezone.utc) < datetime.now(timezone.utc) - timedelta(days=31):
 					logging.info(f'Password for {device.id} has expired, setting new one...')
 					device.generateRandomPassword()
 					self.setNewRecoveryPassword(device)
@@ -294,7 +296,8 @@ class SetRecoveryLock:
 	def getRandomResetTime():
 		baseTime = datetime.now(timezone.utc) + timedelta(days=3)
 		modifier = timedelta(hours=random.randint(-48,48))
-		resetTime = baseTime + modifier
+		resetTimeObj = baseTime + modifier
+		resetTime = resetTimeObj.timestamp()
 		return resetTime
 
 async def main():
