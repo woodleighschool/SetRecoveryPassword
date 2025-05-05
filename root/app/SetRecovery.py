@@ -87,7 +87,7 @@ class StateDatabase:
 			return rows
 	
 	def get(self, computer):
-		password, date, password_uuid = self.cursor.execute('SELECT password, dat, password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
+		password, date, password_uuid = self.cursor.execute('SELECT password, date, password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
 		return (password, date, password_uuid)
 
 	def get_uuid(self, computer):
