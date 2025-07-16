@@ -71,7 +71,8 @@ class StateDatabase:
 					  id INTEGER PRIMARY KEY,
 					  password TEXT,
 					  password_uuid TEXT,
-					  date TEXT NOT NULL
+					  date TEXT NOT NULL,
+					  grace_ticker INTEGER
 					  );
 		''')
 	
@@ -87,10 +88,11 @@ class StateDatabase:
 			return rows
 	
 	def get(self, computer):
-		raw_password, raw_date, password_uuid = self.cursor.execute('SELECT password, date, password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
+		raw_password, raw_date, password_uuid, raw_grace_ticker = self.cursor.execute('SELECT password, date, password_uuid, grace_ticker FROM state WHERE id = ?', (computer.id,)).fetchone()
 		password = None if raw_password == '' else raw_password
+		grace_ticker = None if raw_grace_ticker == '' else raw_grace_ticker
 		date = float(raw_date)
-		return (password, date, password_uuid)
+		return (password, date, password_uuid, grace_ticker)
 
 	def get_uuid(self, computer):
 		password_uuid, = self.cursor.execute('SELECT password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
@@ -104,8 +106,8 @@ class StateDatabase:
 		self.cursor.execute('UPDATE state SET password = ?, date = ? WHERE id = ?', (computer.recovery_password, datetime.today().timestamp(), computer.id))	
 		self._database.commit()
 
-	def touch(self, computer):
-		self.cursor.execute('UPDATE state SET date = ? WHERE id = ?', (datetime.today().timestamp(), computer.id))
+	def touch(self, computer, grace_ticker):
+		self.cursor.execute('UPDATE state SET date = ?, grace_ticker = ? WHERE id = ?', (datetime.today().timestamp(), grace_ticker, computer.id))
 		self._database.commit()
 
 	def migrate(self, computer, password_uuid):
@@ -260,16 +262,25 @@ class SetRecoveryLock:
 		for device in devices:
 			try:
 				logging.debug(f'Getting information for {device.id} from local database')
-				password, date, password_uuid = self.database.get(device)
+				password, date, password_uuid, grace_ticker = self.database.get(device)
 				if password != None:
 					logging.debug(f'Password for {device.id} is still in database, comparing to one in Jamf...')
 					jamf_recovery_password = self.getCurrentRecoveryPassword(device)
 					if jamf_recovery_password == None:
-						logging.debug(f'No password stored in Jamf for {device.id}, extending expiration until the password appears in the record...')
-						self.database.touch(device)
+						if grace_ticker > 0:
+							logging.debug(f'No password stored in Jamf for {device.id}, extending expiration until the password appears in the record...')
+							self.database.touch(device)
+						else:
+							logging.debug(f'Password has not synced in over 7 days, attempting to set again')
+							device.generateRandomPassword()
+							self.setNewRecoveryPassword(device)
+							self.database.update(device)
 					elif jamf_recovery_password != password:
-						logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
-						self.database.touch(device)
+						if grace_ticker > 0:
+							logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
+							self.database.touch(device)
+						else:
+							logging.debug(f'Password has not synced')
 					else:
 						logging.debug(f'Password for {device.id} matches Jamf\'s, moving password from local database into 1Password')
 						await self.moveFromDatabaseToOnePassword(device, password)
