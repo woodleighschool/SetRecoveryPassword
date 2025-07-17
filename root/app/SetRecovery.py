@@ -270,13 +270,14 @@ class SetRecoveryLock:
 					logging.debug(f'Password for {device.id} is still in database, comparing to one in Jamf...')
 					jamf_recovery_password = self.getCurrentRecoveryPassword(device)
 					if jamf_recovery_password == None:
-						if grace_ticker > 0:
+						if grace_ticker == None:
 							logging.debug(f'No password stored in Jamf for {device.id}, extending expiration until the password appears in the record...')
-							grace_ticker -= 1
-							self.database.touch(device, grace_ticker)
-						elif grace_ticker == None:
 							logging.debug(f'No grace ticker has been set, giving the system 7 days to sync up before forcibly resetting')
 							grace_ticker = 7
+							self.database.touch(device, grace_ticker)
+						elif grace_ticker > 0:
+							logging.debug(f'No password stored in Jamf for {device.id}, extending expiration until the password appears in the record...')
+							grace_ticker -= 1
 							self.database.touch(device, grace_ticker)
 						else:
 							logging.debug(f'Password has not synced in over 7 days, attempting to set again')
@@ -284,13 +285,15 @@ class SetRecoveryLock:
 							self.setNewRecoveryPassword(device)
 							self.database.update(device)
 					elif jamf_recovery_password != password:
-						if grace_ticker > 0:
+						if grace_ticker == None:
 							logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
-							grace_ticker -= 1
-							self.database.touch(device, grace_ticker)
-						elif grace_ticker == None:
+
 							logging.debug(f'No grace ticker has been set, giving the system 7 days to sync up before forcibly resetting')
 							grace_ticker = 7
+							self.database.touch(device, grace_ticker)
+						elif grace_ticker > 0:
+							logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
+							grace_ticker -= 1
 							self.database.touch(device, grace_ticker)
 						else:
 							logging.debug(f'Password has not synced')
