@@ -90,9 +90,12 @@ class StateDatabase:
 	def get(self, computer):
 		raw_password, raw_date, password_uuid, raw_grace_ticker = self.cursor.execute('SELECT password, date, password_uuid, grace_ticker FROM state WHERE id = ?', (computer.id,)).fetchone()
 		password = None if raw_password == '' else raw_password
-		grace_ticker = None if raw_grace_ticker == '' else raw_grace_ticker
+		if raw_grace_ticker != None and raw_grace_ticker != '':
+			grace_ticker = int(raw_grace_ticker)
+		else:
+			grace_ticker = None
 		date = float(raw_date)
-		return (password, date, password_uuid, int(grace_ticker))
+		return (password, date, password_uuid, grace_ticker)
 
 	def get_uuid(self, computer):
 		password_uuid, = self.cursor.execute('SELECT password_uuid FROM state WHERE id = ?', (computer.id,)).fetchone()
