@@ -58,7 +58,7 @@ class OnePasswordIntegration:
 
 	async def update(self, uuid, password):
 		item = await self.client.items.get(self.vault_id, uuid)
-		item.field[0].value = password
+		item.fields[0].value = password
 		await self.client.items.put(item)
 
 
