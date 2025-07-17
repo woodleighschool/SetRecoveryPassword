@@ -90,7 +90,7 @@ class StateDatabase:
 	def get(self, computer):
 		raw_password, raw_date, password_uuid, raw_grace_ticker = self.cursor.execute('SELECT password, date, password_uuid, grace_ticker FROM state WHERE id = ?', (computer.id,)).fetchone()
 		password = None if raw_password == '' else raw_password
-		grace_ticker = None if raw_grace_ticker == '' else raw_grace_ticker
+		grace_ticker = None if raw_grace_ticker == '' else int(raw_grace_ticker)
 		date = float(raw_date)
 		return (password, date, password_uuid, grace_ticker)
 
@@ -103,7 +103,7 @@ class StateDatabase:
 		self._database.commit()
 
 	def update(self, computer):
-		self.cursor.execute('UPDATE state SET password = ?, date = ? WHERE id = ?', (computer.recovery_password, datetime.today().timestamp(), computer.id))	
+		self.cursor.execute('UPDATE state SET password = ?, date = ?, grace_ticker = NULL WHERE id = ?', (computer.recovery_password, datetime.today().timestamp(), computer.id))	
 		self._database.commit()
 
 	def touch(self, computer, grace_ticker):
@@ -111,7 +111,7 @@ class StateDatabase:
 		self._database.commit()
 
 	def migrate(self, computer, password_uuid):
-		self.cursor.execute('UPDATE state SET password = \'\', password_uuid = ? WHERE id = ?', (password_uuid, computer.id))
+		self.cursor.execute('UPDATE state SET password = \'\', password_uuid = ?, grace_ticker = NULL WHERE id = ?', (password_uuid, computer.id))
 		self._database.commit()
 
 	def decay(self, computer, date):
