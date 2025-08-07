@@ -69,6 +69,7 @@ The application uses environment variables for configuration:
 | `UPDATE_NOW`         | Run update immediately (`true`/`false`)             | No       | `false`                         |
 | `UPDATE_SCHEDULE`    | Cron schedule for updates                           | No       | `0 0 * * *` (daily at midnight) |
 | `DRY_RUN`            | Run without making changes (`true`/`false`)         | No       | `false`                         |
+| `DB_PATH`            | Path to the SQLite database file                    | No       | `./state.db`                    |
 | `LOG_LEVEL`          | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | No       | `INFO`                          |
 
 ## Usage

@@ -66,10 +66,7 @@ class OnePasswordIntegration:
 
 
 class StateDatabase:
-    def __init__(self, db_path=None):
-        if db_path is None:
-            # Use a local database file in the current working directory
-            db_path = './state.db'
+    def __init__(self, db_path):
         self._database = sqlite3.connect(db_path)
         self.cursor = self._database.cursor()
         self.cursor.execute('''
@@ -82,9 +79,7 @@ class StateDatabase:
 					  );
 		''')
 
-    def reinit(self, db_path=None):
-        if db_path is None:
-            db_path = './state.db'
+    def reinit(self, db_path):
         self._database = sqlite3.connect(db_path)
         self.cursor = self._database.cursor()
 
@@ -136,13 +131,13 @@ class StateDatabase:
 
 
 class SetRecoveryLock:
-    def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, vault_id, onepassword_token, dry_run):
+    def __init__(self, jamf_host, jamf_client_id, jamf_client_secret, vault_id, onepassword_token, dry_run, db_path):
         self.jamf_host = jamf_host
         self.jamf_client_id = jamf_client_id
         self.jamf_client_secret = jamf_client_secret
         self.dry_run = dry_run
         self.onePassword = OnePasswordIntegration(vault_id, onepassword_token)
-        self.database = StateDatabase()
+        self.database = StateDatabase(db_path)
         self.__authenticate_jamf_API__()
         logging.info('Initiliazed service')
 
@@ -392,6 +387,7 @@ For more information, visit: https://github.com/woodleighschool/SetRecoveryPassw
     jamf_host = os.getenv('JAMF_HOST', '')
     vault_id = os.getenv('VAULT_ID', '')
     onepassword_token = os.getenv('ONEPASSWORD_TOKEN', '')
+    db_path = os.getenv('DB_PATH', './state.db')
 
     if not all([jamf_client_id, jamf_client_secret, jamf_host, vault_id, onepassword_token]):
         logging.error('Missing required environment variables:')
@@ -411,7 +407,7 @@ For more information, visit: https://github.com/woodleighschool/SetRecoveryPassw
     update_now = os.getenv('UPDATE_NOW', 'false').lower() == 'true'
     dry_run = os.getenv('DRY_RUN', 'false').lower() == 'true'
 
-    update = SetRecoveryLock(jamf_host, jamf_client_id, jamf_client_secret, vault_id, onepassword_token, dry_run)
+    update = SetRecoveryLock(jamf_host, jamf_client_id, jamf_client_secret, vault_id, onepassword_token, dry_run, db_path)
 
     if update_now:
         logging.info('Running update immediately due to UPDATE_NOW setting')
