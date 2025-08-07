@@ -1,5 +1,0 @@
-#!/usr/bin/with-contenv bash
-
-exec \
-    s6-setuidgid abc \
-        /venv/bin/python3 /app/SetRecovery.py
