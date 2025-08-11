@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "setrecoverypassword"
-version = "1.0.4"
+version = "1.1.0"
 description = "Sets random recovery passwords for modern macOS devices via the Jamf API and stores them in 1Password"
 readme = "README.md"
 requires-python = ">=3.8"
