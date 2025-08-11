@@ -331,7 +331,7 @@ class SetRecoveryLock:
         return resetTime
 
 
-async def main():
+async def _async_main():
     # Check for help flag
     if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h', 'help']:
         print("""
@@ -425,7 +425,15 @@ For more information, visit: https://github.com/woodleighschool/SetRecoveryPassw
             logging.info('Scheduler shutdown initiated')
             scheduler.shutdown()
 
+def main():
+    """Synchronous entrypoint for console script.
+
+    This wraps the internal async logic so that the setuptools
+    console_scripts entry point (setrecoverypassword = setrecoverypassword:main)
+    invokes a normal callable instead of returning an un-awaited coroutine.
+    """
+    asyncio.run(_async_main())
+
+
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
+    main()
