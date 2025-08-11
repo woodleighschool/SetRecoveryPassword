@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
-dependencies = ["requests>=2.32.4", "APScheduler>=3.11.0", "onepassword>=0.4.1"]
+dependencies = ["requests", "APScheduler", "onepassword-sdk"]
 
 [project.scripts]
 setrecoverypassword = "setrecoverypassword:main"
