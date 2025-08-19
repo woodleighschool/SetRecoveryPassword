@@ -67,6 +67,7 @@ class OnePasswordIntegration:
 
 class StateDatabase:
     def __init__(self, db_path):
+        self._path = db_path
         self._database = sqlite3.connect(db_path)
         self.cursor = self._database.cursor()
         self.cursor.execute('''
@@ -79,8 +80,8 @@ class StateDatabase:
 					  );
 		''')
 
-    def reinit(self, db_path):
-        self._database = sqlite3.connect(db_path)
+    def reinit(self):
+        self._database = sqlite3.connect(self._path)
         self.cursor = self._database.cursor()
 
     def get_all(self):
