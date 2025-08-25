@@ -244,11 +244,18 @@ class SetRecoveryLock:
 		}
 
 		if not self.dry_run:
-			response = requests.post(f'https://{self.jamf_host}/api/v2/mdm/commands', headers=headers, json=payload)
-			response.raise_for_status()
-			logging.info(f'Recovery password set for computer {computer.id} successfully')
+			try:
+				response = requests.post(f'https://{self.jamf_host}/api/v2/mdm/commands', headers=headers, json=payload)
+				response.raise_for_status()
+				logging.info(f'Recovery password set for computer {computer.id} successfully')
+				return True
+			except requests.exceptions.HTTPError as E:
+				logging.error(f'Error encountered setting recovery password for {computer.id}')
+				logging.error(f'Error message: {E}')
+				return False
 		else:
 			logging.debug(f'DRY RUN: Would have set password for {computer.name} to {computer.recovery_password}')
+			return False
 
 	async def moveFromDatabaseToOnePassword(self, computer, password):
 		self.__check_cursor__()
@@ -280,27 +287,29 @@ class SetRecoveryLock:
 							grace_ticker = 7
 							self.database.touch(device, grace_ticker)
 						elif grace_ticker > 0:
-							logging.debug(f'No password stored in Jamf for {device.id}, extending expiration until the password appears in the record...')
+							logging.debug(f'No password stored in Jamf for {device.id}, decreasing grace timer until the password appears in the record...')
 							grace_ticker -= 1
 							self.database.touch(device, grace_ticker)
 						else:
 							logging.debug(f'Password has not synced in over 7 days, attempting to set again')
 							device.generateRandomPassword()
-							self.setNewRecoveryPassword(device)
-							self.database.update(device)
+							if self.setNewRecoveryPassword(device):
+								self.database.update(device)
 					elif jamf_recovery_password != password:
 						if grace_ticker == None:
 							logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
-
 							logging.debug(f'No grace ticker has been set, giving the system 7 days to sync up before forcibly resetting')
 							grace_ticker = 7
 							self.database.touch(device, grace_ticker)
 						elif grace_ticker > 0:
-							logging.debug(f'Password for {device.id} is different to one in Jamf, extending expiration until they match')
+							logging.debug(f'Password for {device.id} is different to one in Jamf, decreasing grace timer')
 							grace_ticker -= 1
 							self.database.touch(device, grace_ticker)
 						else:
-							logging.debug(f'Password has not synced')
+							logging.debug(f'Password has not synced in over 7 days, attempting to set again')
+							device.generateRandomPassword()
+							if self.setNewRecoveryPassword(device):
+								self.database.update(device)
 					else:
 						logging.debug(f'Password for {device.id} matches Jamf\'s, moving password from local database into 1Password')
 						await self.moveFromDatabaseToOnePassword(device, password)
@@ -313,16 +322,13 @@ class SetRecoveryLock:
 				elif datetime.fromtimestamp(date, tz=timezone.utc) < datetime.now(timezone.utc) - timedelta(days=31):
 					logging.info(f'Password for {device.id} has expired, setting new one...')
 					device.generateRandomPassword()
-					self.setNewRecoveryPassword(device)
-					self.database.update(device)
+					if self.setNewRecoveryPassword(device):
+						self.database.update(device)
 			except TypeError:
 				logging.info(f'No record in local database for {device.id}, setting new password and creating record...')
 				device.generateRandomPassword()
-				self.setNewRecoveryPassword(device)
-				self.database.create(device)
-			except requests.exceptions.HTTPError as E:
-				logging.error(f'Error from Jamf encountered for device {id}')
-				logging.error(f'Error message: {E}')
+				if self.setNewRecoveryPassword(device):
+					self.database.create(device)
 
 		self.database.close()
 
