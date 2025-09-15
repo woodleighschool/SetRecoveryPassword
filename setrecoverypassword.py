@@ -329,7 +329,8 @@ class SetRecoveryLock:
 				device.generateRandomPassword()
 				if self.setNewRecoveryPassword(device):
 					self.database.create(device)
-
+		
+		logging.info("All computers synced or awaiting grace period")
 		self.database.close()
 
 	@staticmethod
