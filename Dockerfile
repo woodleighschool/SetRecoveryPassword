@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM docker.io/library/python:3.12-slim
+FROM docker.io/library/python:3.14-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DB_PATH="/config/state.db"
