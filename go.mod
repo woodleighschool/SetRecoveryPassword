@@ -1,4 +1,4 @@
-module github.com/woodleighschool/UpdateUserInfo
+module github.com/woodleighschool/SetRecoveryPassword
 
 go 1.25.1
 
