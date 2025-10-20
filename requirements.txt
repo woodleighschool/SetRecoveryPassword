@@ -1,3 +1,0 @@
-requests
-APScheduler
-onepassword-sdk
