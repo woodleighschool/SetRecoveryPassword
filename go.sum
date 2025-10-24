@@ -121,10 +121,8 @@ github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834 h1:ZF+QBjOI+tILZ
 github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834/go.mod h1:m9ymHTgNSEjuxvw8E7WWe4Pl4hZQHXONY8wE6dMLaRk=
 github.com/tetratelabs/wazero v1.9.0 h1:IcZ56OuxrtaEz8UYNRHBrUa9bYeX9oVY93KspZZBf/I=
 github.com/tetratelabs/wazero v1.9.0/go.mod h1:TSbcXCfFP0L2FGkRPxHphadXPjo1T6W+CseNNY7EkjM=
-github.com/woodleighschool/go-api-sdk-jamfpro v1.41.5-dev h1:wSlScjKm7WY1eecUKZPtwMk/8Ta/LF+a8mCdfrtkDXU=
-github.com/woodleighschool/go-api-sdk-jamfpro v1.41.5-dev/go.mod h1:dwx+HJzJvItLJ2OO7Wsfih82wZzAtlgBKGPgLiAQw/w=
-github.com/woodleighschool/go-api-sdk-jamfpro v1.41.6-dev h1:nfibOn/a6gxl6ebcLGhuYNFJBPfm0GvIYyDMOuA8VzM=
-github.com/woodleighschool/go-api-sdk-jamfpro v1.41.6-dev/go.mod h1:dwx+HJzJvItLJ2OO7Wsfih82wZzAtlgBKGPgLiAQw/w=
+github.com/woodleighschool/go-api-sdk-jamfpro v1.41.7-dev h1:2fcrtAcVFLL67lRN2GYwNdf8PCQ4aB/eY+WeL2VtVbg=
+github.com/woodleighschool/go-api-sdk-jamfpro v1.41.7-dev/go.mod h1:dwx+HJzJvItLJ2OO7Wsfih82wZzAtlgBKGPgLiAQw/w=
 github.com/yuin/goldmark v1.4.13/go.mod h1:6yULJ656Px+3vBD8DxQVa3kxgyrAnzto9xy5taEt/CY=
 go.opentelemetry.io/proto/otlp v1.3.1 h1:TrMUixzpM0yuc/znrFTP9MMRh8trP93mkCiDVeXrui0=
 go.opentelemetry.io/proto/otlp v1.3.1/go.mod h1:0X1WI4de4ZsLrrJNLAQbFeLCm3T7yBkR0XqQ7niQU+8=
