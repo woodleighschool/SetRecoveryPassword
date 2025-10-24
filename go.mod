@@ -8,7 +8,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
-	github.com/woodleighschool/go-api-sdk-jamfpro v1.41.6-dev
+	github.com/woodleighschool/go-api-sdk-jamfpro v1.41.7-dev
 )
 
 require (
