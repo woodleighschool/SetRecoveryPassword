@@ -6,24 +6,28 @@ import (
 	"math/rand"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/woodleighschool/SetRecoveryPassword/internal/config"
+	"github.com/woodleighschool/SetRecoveryPassword/internal/db"
 	"github.com/woodleighschool/go-api-sdk-jamfpro/sdk/jamfpro"
 )
 
 var seededRand *rand.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type Device struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	ManagementID     string `json:"management_id"`
-	RecoveryPassword string `json:"recovery_password"`
+	ID               int      `json:"id"`
+	Name             string   `json:"name"`
+	ManagementID     string   `json:"management_id"`
+	RecoveryPassword string   `json:"recovery_password"`
+	DatabaseInfo     db.Entry `json:"databaseInfo"`
 }
 
 type Client interface {
 	GetComputers() ([]Device, error)
-	GetRecoveryPassword(device *Device) (string, error)
+	GetComputer(string) (*Device, error)
+	GetRecoveryPassword(device *Device) error
 	SetRecoveryPassword(device *Device) error
 	Close() error
 }
@@ -96,9 +100,13 @@ func (j *jamfClient) GetComputers() ([]Device, error) {
 	var computers []Device
 	for i := 0; i < resp.TotalCount; i++ {
 		deviceResp := resp.Results[i]
-
+		deviceID, err := strconv.Atoi(*deviceResp.ID)
+		if err != nil {
+			j.logger.Error("Error creating device", "device", *deviceResp.ID)
+			continue
+		}
 		device := Device{
-			ID:           *deviceResp.ID,
+			ID:           deviceID,
 			Name:         *deviceResp.General.Name,
 			ManagementID: *deviceResp.General.ManagementId,
 		}
@@ -109,15 +117,33 @@ func (j *jamfClient) GetComputers() ([]Device, error) {
 	return computers, nil
 }
 
-func (j *jamfClient) GetRecoveryPassword(device *Device) (string, error) {
-	j.logger.Debug("Getting recovery password", "computer", device.Name)
-
-	password, err := j.client.GetComputerRecoveryLockPasswordByID(device.ID)
+func (j *jamfClient) GetComputer(id string) (*Device, error) {
+	j.logger.Debug("Getting specific macOS device", "computerID", id)
+	resp, err := j.client.GetComputerInventoryByID(id)
 	if err != nil {
-		return "", fmt.Errorf("failed to get recovery password: %w", err)
+		return nil, fmt.Errorf("unable to get device information from Jamf: %w", err)
 	}
+	deviceID, err := strconv.Atoi(*resp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("unable to convert id string to int from Jamf: %w", err)
+	}
+	return &Device{
+		ID:           deviceID,
+		Name:         *resp.General.Name,
+		ManagementID: *resp.General.ManagementId,
+	}, nil
 
-	return password.RecoveryLockPassword, nil
+}
+
+func (j *jamfClient) GetRecoveryPassword(device *Device) error {
+	j.logger.Debug("Getting recovery password", "computer", device.Name)
+	idString := strconv.Itoa(device.ID)
+	password, err := j.client.GetComputerRecoveryLockPasswordByID(idString)
+	if err != nil {
+		return fmt.Errorf("failed to get recovery password: %w", err)
+	}
+	device.RecoveryPassword = password.RecoveryLockPassword
+	return nil
 }
 
 func (j *jamfClient) SetRecoveryPassword(device *Device) error {
@@ -127,9 +153,9 @@ func (j *jamfClient) SetRecoveryPassword(device *Device) error {
 		mdmCommand := &jamfpro.ResourceMDMCommandRequest{
 			CommandData: jamfpro.CommandData{
 				CommandType: "SET_RECOVERY_LOCK",
-				NewPassword: device.RecoveryPassword,
+				NewPassword: &device.RecoveryPassword,
 			},
-			ClientData: []jamfpro.ClientData{jamfpro.ClientData{ManagementID: device.ManagementID}},
+			ClientData: []jamfpro.ClientData{{ManagementID: device.ManagementID}},
 		}
 		_, err := j.client.SendMDMCommandForCreationAndQueuing(mdmCommand)
 		if err != nil {

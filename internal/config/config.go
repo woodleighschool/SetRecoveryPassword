@@ -16,6 +16,7 @@ type Config struct {
 	InstanceDomain           string `mapstructure:"instance_domain"`
 	ClientID                 string `mapstructure:"client_id"`
 	ClientSecret             string `mapstructure:"client_secret"`
+	JamfID                   string `mapstructure:"jamf_id"`
 	AuthMethod               string `mapstructure:"auth_method"`
 	TokenRefreshBufferPeriod string `mapstructure:"token_refresh_buffer_period_seconds"`
 	TokenBufferPeriod        string `mapstructure:"token_buffer_period_seconds"`
@@ -23,9 +24,15 @@ type Config struct {
 	OnePasswordToken string `mapstructure:"onepassword_token"`
 	VaultID          string `mapstructure:"onepassword_vault_id"`
 
-	SyncSchedule string `mapstructure:"sync_schedule"`
-	LogLevel     string `mapstructure:"log_level"`
-	DryRun       bool   `mapstructure:"dry_run"`
+	DatabaseHost     string `mapstructure:"database_host"`
+	DatabasePort     string `mapstructure:"DatabasePort"`
+	DatabaseUsername string `mapstructure:"database_username"`
+	DatabasePassword string `mapstructure:"database_password"`
+
+	PasswordLength int    `mapstructure:"password_length"`
+	SyncSchedule   string `mapstructure:"sync_schedule"`
+	LogLevel       string `mapstructure:"log_level"`
+	DryRun         bool   `mapstructure:"dry_run"`
 }
 
 func Load() (*Config, error) {

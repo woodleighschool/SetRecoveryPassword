@@ -24,7 +24,7 @@ all: clean test build
 .PHONY: build
 build:
 	@echo "Building $(APP_NAME) version $(VERSION)..."
-	$(GOBUILD) $(LDFLAGS) -o $(APP_NAME) ./cmd/updateuserinfo
+	$(GOBUILD) $(LDFLAGS) -o $(APP_NAME) ./cmd/$(APP_NAME)
 
 # Build for multiple platforms
 .PHONY: build-all

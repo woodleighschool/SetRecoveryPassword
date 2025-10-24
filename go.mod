@@ -3,16 +3,15 @@ module github.com/woodleighschool/SetRecoveryPassword
 go 1.25.1
 
 require (
-	github.com/go-ldap/ldap/v3 v3.4.12
+	github.com/1password/onepassword-sdk-go v0.3.1
+	github.com/jackc/pgx/v5 v5.7.6
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.21.0
-	github.com/woodleighschool/go-api-sdk-jamfpro v1.41.4-dev
+	github.com/woodleighschool/go-api-sdk-jamfpro v1.41.6-dev
 )
 
 require (
-	github.com/1password/onepassword-sdk-go v0.3.1 // indirect
-	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
 	github.com/antchfx/xmlquery v1.4.4 // indirect
 	github.com/antchfx/xpath v1.3.3 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.39.2 // indirect
@@ -36,17 +35,17 @@ require (
 	github.com/aws/smithy-go v1.23.0 // indirect
 	github.com/deploymenttheory/go-api-http-client v0.4.4 // indirect
 	github.com/deploymenttheory/go-api-http-client-integrations v0.0.14 // indirect
-	github.com/deploymenttheory/go-api-sdk-jamfpro v1.41.1 // indirect
 	github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a // indirect
 	github.com/extism/go-sdk v1.7.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20240805132620-81f5be970eca // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
@@ -57,7 +56,6 @@ require (
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
-	github.com/woodleighschool/setrecoverypassword v1.2.2 // indirect
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
