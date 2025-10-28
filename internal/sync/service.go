@@ -54,10 +54,10 @@ func (s *Service) Sync() error {
 
 	for i := range computers {
 		computer := &computers[i]
-		s.logger.Debug("Getting information from database", "computer", computer.Name)
+		s.logger.Debug("Getting information from database", "computer", computer.Name, "id", computer.ID)
 		entry, err := s.dbClient.GetEntry(computer.ID)
 		if err != nil {
-			s.logger.Error("Unable to get infomation from database", "computer", computer.Name, "error", err)
+			s.logger.Error("Unable to get infomation from database", "computer", computer.Name, "id", computer.ID, "error", err)
 			continue
 		} else if entry == nil {
 			s.NewDevice(computer)
@@ -67,56 +67,56 @@ func (s *Service) Sync() error {
 		} else {
 			err := s.jamfClient.GetRecoveryPassword(computer)
 			if err != nil {
-				s.logger.Error("Unable to retrieve recovery password", "computer", computer.Name)
+				s.logger.Error("Unable to retrieve recovery password", "computer", computer.Name, "id", computer.ID, "error", err)
 				continue
 			}
 
 			state, err := s.DetermineState(computer, entry)
 			if err != nil {
-				s.logger.Error("Unable to determine state, skipping out of caution", "computer", computer, "error", err)
+				s.logger.Error("Unable to determine state, skipping out of caution", "computer", computer, "id", computer.ID, "error", err)
 				continue
 			}
 
 			switch state {
 			case "JamfMissing":
-				s.logger.Debug("No password found in Jamf", "computer", computer.Name)
+				s.logger.Debug("No password found in Jamf", "computer", computer.Name, "id", computer.ID)
 				err := s.UpdateDevice(computer, entry)
 				if err != nil {
-					s.logger.Error("Unable to update device", "computer", computer.Name, "error", err)
+					s.logger.Error("Unable to update device", "computer", computer.Name, "id", computer.ID, "error", err)
 					continue
 				}
 			case "JamfMismatch":
-				s.logger.Debug("Password in database does not match password in Jamf", "computer", computer.Name)
+				s.logger.Debug("Password in database does not match password in Jamf", "computer", computer.Name, "id", computer.ID)
 				err := s.UpdateDevice(computer, entry)
 				if err != nil {
-					s.logger.Error("Unable to update device", "computer", computer.Name, "error", err)
+					s.logger.Error("Unable to update device", "computer", computer.Name, "id", computer.ID, "error", err)
 				}
 			case "Synced":
-				s.logger.Debug("Password in Jamf matches password in database, migrating password to 1Password", "computer", computer)
+				s.logger.Debug("Password in Jamf matches password in database, migrating password to 1Password", "computer", computer, "id", computer.ID)
 				err := s.MigrateDevice(computer, entry)
 				if err != nil {
-					s.logger.Error("Unable to migrate password to 1Password", "computer", computer.Name, "error", err)
+					s.logger.Error("Unable to migrate password to 1Password", "computer", computer.Name, "id", computer.ID, "error", err)
 					continue
 				}
 			case "ErrorState":
-				s.logger.Debug("Database entry has gotten into an abnormal state, resetting password to refresh state", "computer", computer.Name)
+				s.logger.Debug("Database entry has gotten into an abnormal state, resetting password to refresh state", "computer", computer.Name, "id", computer.ID)
 				err := s.ResetDevice(computer, entry)
 				if err != nil {
-					s.logger.Error("Unable to reset errored device", "computer", computer.Name, "error", err)
+					s.logger.Error("Unable to reset errored device", "computer", computer.Name, "id", computer.ID, "error", err)
 					continue
 				}
 			case "Expired":
-				s.logger.Debug("Password has expired, setting a new one", "computer", computer.Name)
+				s.logger.Debug("Password has expired, setting a new one", "computer", computer.Name, "id", computer.ID)
 				err := s.ResetDevice(computer, entry)
 				if err != nil {
-					s.logger.Error("Unable to reset expired device", "computer", computer.Name, "error", err)
+					s.logger.Error("Unable to reset expired device", "computer", computer.Name, "id", computer.ID, "error", err)
 					continue
 				}
 			case "NoAction":
-				s.logger.Debug("No action to be taken", "computer", computer.Name)
+				s.logger.Debug("No action to be taken", "computer", computer.Name, "id", computer.ID)
 				continue
 			default:
-				s.logger.Warn("Unable to determine state, skipping out of caution", "computer", computer)
+				s.logger.Warn("Unable to determine state, skipping out of caution", "computer", computer, "id", computer.ID)
 				continue
 			}
 		}
@@ -126,11 +126,11 @@ func (s *Service) Sync() error {
 }
 
 func (s *Service) NewDevice(computer *jamf.Device) error {
-	s.logger.Info("Computer not found in database, setting new password and creating record", "computer", computer.Name)
+	s.logger.Info("Computer not found in database, setting new password and creating record", "computer", computer.Name, "id", computer.ID)
 	computer.GenerateNewRecoveryPassword(s.config.PasswordLength)
 	err := s.jamfClient.SetRecoveryPassword(computer)
 	if err != nil {
-		s.logger.Error("Unable to set recovery password", "computer", computer.Name, "error", err)
+		s.logger.Error("Unable to set recovery password", "computer", computer.Name, "id", computer.ID, "error", err)
 		return err
 	}
 	dateTime := time.Now().Format(time.UnixDate)
@@ -140,39 +140,39 @@ func (s *Service) NewDevice(computer *jamf.Device) error {
 		Date:     &dateTime,
 	})
 	if err != nil {
-		s.logger.Error("Unable to create database entry", "computer", computer.Name, "error", err)
+		s.logger.Error("Unable to create database entry", "computer", computer.Name, "id", computer.ID, "error", err)
 	}
 	return nil
 }
 
 func (s *Service) MigrateDevice(computer *jamf.Device, entry *db.Entry) error {
 	if entry.OPUUID != nil {
-		s.logger.Debug("Database entry already has 1Password UUID, updating password", "computer", computer.Name)
+		s.logger.Debug("Database entry already has 1Password UUID, updating password", "computer", computer.Name, "id", computer.ID)
 		err := s.opClient.UpdateSecret(*entry.OPUUID, *entry.Password)
 		if err != nil {
-			s.logger.Error("Unable to update 1Password entry", "computer", computer.Name, "error", err)
+			s.logger.Error("Unable to update 1Password entry", "computer", computer.Name, "id", computer.ID, "error", err)
 			return err
 		}
 	} else {
-		s.logger.Debug("No 1Password UUID in database, creating new record", "computer", computer.Name)
+		s.logger.Debug("No 1Password UUID in database, creating new record", "computer", computer.Name, "id", computer.ID)
 		uuid, err := s.opClient.CreateSecret(computer, *entry.Password)
 		if err != nil {
-			s.logger.Error("Unable to create 1Password entry", "computer", computer.Name, "error", err)
+			s.logger.Error("Unable to create 1Password entry", "computer", computer.Name, "id", computer.ID, "error", err)
 			return err
 		}
 		entry.OPUUID = &uuid
 	}
-	s.logger.Debug("1Password updated, removing password from database and adding UUID", "computer", computer.Name)
+	s.logger.Debug("1Password updated, removing password from database and adding UUID", "computer", computer.Name, "id", computer.ID)
 	err := s.dbClient.UpdateEntryMigrate(entry)
 	if err != nil {
-		s.logger.Error("Unable to add 1Password UUID to database entry", "computer", computer.Name, "error", err)
+		s.logger.Error("Unable to add 1Password UUID to database entry", "computer", computer.Name, "id", computer.ID, "error", err)
 	}
 	return nil
 }
 
 func (s *Service) UpdateDevice(computer *jamf.Device, entry *db.Entry) error {
 	if entry.GraceTicker == nil {
-		s.logger.Debug("No grace ticker has been set, giving the system 7 days to sync before resetting", "computer", computer.Name)
+		s.logger.Debug("No grace ticker has been set, giving the system 7 days to sync before resetting", "computer", computer.Name, "id", computer.ID)
 		graceTicker := 7
 		entry.GraceTicker = &graceTicker
 		*entry.Date = time.Now().Format(time.UnixDate)
@@ -181,7 +181,7 @@ func (s *Service) UpdateDevice(computer *jamf.Device, entry *db.Entry) error {
 			return fmt.Errorf("unable to set grace ticker: %w", err)
 		}
 	} else if *entry.GraceTicker > 0 {
-		s.logger.Debug("Grace ticker is above 0, decreasing", "grace_ticker", entry.GraceTicker, "computer", computer.Name)
+		s.logger.Debug("Grace ticker is above 0, decreasing", "grace_ticker", entry.GraceTicker, "computer", computer.Name, "id", computer.ID)
 		*entry.GraceTicker -= 1
 		*entry.Date = time.Now().Format(time.UnixDate)
 		err := s.dbClient.UpdateEntryTouch(entry)
@@ -189,7 +189,7 @@ func (s *Service) UpdateDevice(computer *jamf.Device, entry *db.Entry) error {
 			return fmt.Errorf("unable to set grace ticker: %w", err)
 		}
 	} else {
-		s.logger.Debug("Grace ticker is at 0, resetting password to try sync again", "computer", computer.Name)
+		s.logger.Debug("Grace ticker is at 0, resetting password to try sync again", "computer", computer.Name, "id", computer.ID)
 		err := s.ResetDevice(computer, entry)
 		if err != nil {
 			return err

@@ -136,7 +136,7 @@ func (j *jamfClient) GetComputer(id string) (*Device, error) {
 }
 
 func (j *jamfClient) GetRecoveryPassword(device *Device) error {
-	j.logger.Debug("Getting recovery password", "computer", device.Name)
+	j.logger.Debug("Getting recovery password", "computer", device.Name, "id", device.ID)
 	idString := strconv.Itoa(device.ID)
 	password, err := j.client.GetComputerRecoveryLockPasswordByID(idString)
 	if err != nil {
@@ -147,7 +147,7 @@ func (j *jamfClient) GetRecoveryPassword(device *Device) error {
 }
 
 func (j *jamfClient) SetRecoveryPassword(device *Device) error {
-	j.logger.Debug("Setting recovery password", "computer", device.Name)
+	j.logger.Debug("Setting recovery password", "computer", device.Name, "id", device.ID)
 
 	if !j.config.DryRun {
 		mdmCommand := &jamfpro.ResourceMDMCommandRequest{
@@ -162,7 +162,7 @@ func (j *jamfClient) SetRecoveryPassword(device *Device) error {
 			return fmt.Errorf("failed to set recovery password: %w", err)
 		}
 	}
-	j.logger.Info("Set password successfully", "computer", device.Name)
+	j.logger.Info("Set password successfully", "computer", device.Name, "id", device.ID)
 	return nil
 }
 
