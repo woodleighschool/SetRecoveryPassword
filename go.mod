@@ -15,7 +15,7 @@ require (
 	github.com/antchfx/xmlquery v1.5.0 // indirect
 	github.com/antchfx/xpath v1.3.6 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.39.6 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.3 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.31.17 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.21 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.13 // indirect
@@ -32,7 +32,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.39.1 // indirect
-	github.com/aws/smithy-go v1.23.2 // indirect
+	github.com/aws/smithy-go v1.24.2 // indirect
 	github.com/deploymenttheory/go-api-http-client v0.4.4 // indirect
 	github.com/deploymenttheory/go-api-http-client-integrations v0.0.14 // indirect
 	github.com/dylibso/observe-sdk/go v0.0.0-20240828172851-9145d8ad07e1 // indirect
