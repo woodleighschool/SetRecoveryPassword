@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/1password/onepassword-sdk-go v0.4.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
