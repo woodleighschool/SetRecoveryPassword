@@ -1,0 +1,89 @@
+[tools]
+go = "1.27.1"
+"go:github.com/google/go-licenses/v2" = "v2.0.1"
+"go:golang.org/x/vuln/cmd/govulncheck" = "v1.8.0"
+golangci-lint = "2.14.0"
+lefthook = "2.1.14"
+actionlint = "1.7.12"
+zizmor = "1.30.1"
+oxfmt = "0.70.0"
+"npm:@commitlint/cli" = "21.2.3"
+
+[settings]
+experimental = true
+pin = true
+lockfile = true
+
+[tasks.deps]
+description = "Install dependencies"
+run = "go mod download"
+
+[tasks.build]
+description = "Build application"
+run = "go build -trimpath -ldflags '-X main.version=dev' -o jamf-recovery-lock ./cmd/jamf-recovery-lock"
+
+[tasks.notices]
+description = "Collect dependency licenses and notices"
+run = "go-licenses save ./cmd/jamf-recovery-lock --save_path third_party_licenses --ignore github.com/woodleighschool/jamf-recovery-lock --force"
+
+[tasks.tidy]
+description = "Tidy the Go module"
+run = "go mod tidy"
+
+[tasks.tidy-check]
+description = "Check the Go module is tidy"
+run = "go mod tidy -diff"
+
+[tasks.vulncheck]
+description = "Scan for known vulnerabilities with govulncheck"
+run = "govulncheck ./..."
+
+[tasks.test]
+description = "Run dependency-free Go checks"
+run = ["go vet ./...", "go test -race -count=1 ./..."]
+
+[tasks.lint-fix]
+description = "Run linters and apply fixes"
+run = "golangci-lint run --fix"
+
+[tasks.lint]
+description = "Run linters"
+run = "golangci-lint run"
+
+[tasks.format]
+description = "Format Go code"
+run = "go fmt ./..."
+
+[tasks.fmt-check]
+description = "Check Go formatting"
+run = "test -z \"$(gofmt -l .)\" || { gofmt -l .; exit 1; }"
+
+[tasks.clean]
+description = "Remove local build outputs"
+run = "rm -f jamf-recovery-lock coverage.out && rm -rf dist"
+
+[tasks.workflow-lint]
+description = "Lint GitHub workflows"
+run = [
+  "actionlint -shellcheck= -ignore 'label \"ubuntu-26[.]04(-arm)?\" is unknown'",
+  "zizmor --offline .github/workflows",
+]
+
+[tasks.container-check]
+description = "Build the production container locally"
+run = "docker build --check . && docker build -t jamf-recovery-lock:local ."
+
+[tasks.check]
+description = "Run local CI checks"
+run = [
+  "mise run fmt-check",
+  "mise run tidy-check",
+  "mise run lint",
+  "mise run test",
+  "mise run build",
+  "mise run vulncheck",
+  "mise run workflow-lint",
+]
+
+[hooks]
+postinstall = "lefthook install"

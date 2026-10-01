@@ -1,0 +1,9 @@
+{
+  "ignorePatterns": [
+    "CHANGELOG.md",
+    ".release-please-manifest.json",
+    ".mise/locks/",
+    "jamf-recovery-lock.schema.json",
+  ],
+  "printWidth": 100,
+}
