@@ -1,163 +1,118 @@
-# SetRecoveryPassword
+# jamf-recovery-lock
 
-A Python application that sets random recovery passwords for modern macOS devices via the Jamf API and stores them securely in 1Password.
+A legacy Jamf maintenance utility retained while Jamf remains deployed. It rotates
+Recovery Lock passwords on managed Apple silicon Macs and stores confirmed
+passwords in 1Password. PostgreSQL holds pending rotations and the existing
+1Password item mapping.
 
-## Features
+## 🔄 Execution
 
--   Authenticates with Jamf Pro API using OAuth2 client credentials
--   Generates random recovery passwords for macOS devices
--   Temporarily stores passwords in a local SQLite database until Jamf API reflects changes
--   Securely stores passwords in 1Password using service account integration
--   Automatically rotates passwords on a configurable schedule (default: monthly)
--   Supports scheduled updates using cron expressions
--   Configurable logging levels
--   Can run as a one-time update or scheduled background process
--   Dry run mode for testing without making changes
+Each invocation validates configuration, reconciles once, logs a summary and exits.
+Kubernetes CronJobs in wood-ops own scheduling, retries and concurrency. Per-device
+failures continue through the fleet and produce a non-zero exit status.
 
-## Installation
+A rotation is saved as `prepared` before Jamf submission, then `pending` with the
+returned command UUID. Only an acknowledged `SET_RECOVERY_LOCK` command **and** a
+matching Jamf-reported password permit a 1Password update. The candidate remains in
+PostgreSQL until that update succeeds. Stable passwords rotate after 31 days.
 
-### Option 1: From GitHub Release
+Pending or `NotNow` commands retain their candidate. Acknowledgement with stale
+inventory is checked again on later runs. After seven days without confirmation,
+the run reports an overdue failure; it still never sends another candidate. A
+failed command enters `blocked`, retaining the candidate and the previous
+1Password secret. Unknown command history is treated as unconfirmed.
 
-Download the wheel file from the [latest release](https://github.com/woodleighschool/SetRecoveryPassword/releases) and install:
+Submission cannot be atomic across PostgreSQL and Jamf. A crash after saving
+`prepared`, an ambiguous submission response, or failure to save the returned UUID
+requires command-history review before repair. A session advisory lock prevents
+overlapping runs from submitting competing rotations.
 
-```bash
-pip3 install setrecoverypassword-*.whl
+## ⚙️ Configuration
+
+| Variable                                                  | Purpose / default                                          |
+| --------------------------------------------------------- | ---------------------------------------------------------- |
+| `INSTANCE_DOMAIN`                                         | Required Jamf HTTPS URL or hostname                        |
+| `CLIENT_ID`, `CLIENT_SECRET`                              | Required Jamf OAuth client credentials                     |
+| `ONEPASSWORD_TOKEN`                                       | Required 1Password service account token                   |
+| `ONEPASSWORD_VAULT_ID`                                    | Required destination vault ID                              |
+| `DATABASE_HOST`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` | Required PostgreSQL connection credentials                 |
+| `DATABASE_PORT`                                           | `5432`                                                     |
+| `PASSWORD_LENGTH`                                         | `10` uppercase letters, generated with `crypto/rand`       |
+| `ROTATION_AGE`                                            | `744h` (31 days)                                           |
+| `PENDING_AGE`                                             | `168h` (seven days), an alert threshold                    |
+| `RUN_TIMEOUT`                                             | `30m`                                                      |
+| `JAMF_ID`                                                 | Optional single managed Apple silicon computer ID          |
+| `DRY_RUN`                                                 | `false`; inspect without changing Jamf, state or 1Password |
+| `LOG_LEVEL`                                               | `info`; also `debug`, `warn`, `error`                      |
+
+`--dry-run` overrides the environment. `--help` and `--version` do not connect to
+external systems. There is no internal scheduler.
+
+The backing database remains `setrecoverypassword`, with table
+`recovery_password_state`. Startup upgrades its schema transactionally and
+idempotently. Stable rows and 1Password IDs survive unchanged. Legacy candidates
+without a command UUID enter `blocked` because their success cannot be established
+from inventory alone. Dry-run reads the old schema without migrating it.
+
+## 🔎 Recovery failures
+
+Apple requires the correct current password to change an existing Recovery Lock.
+Generating another candidate does not repair incorrect current-password knowledge.
+Jamf documents [PI147605, fixed in 11.27.0](https://learn.jamf.com/r/en-US/jamf-pro-release-notes-11.27.0/Resolved_Issues?contentId=XAU9HcP4MRVDCLQu2a60Dg):
+a password can fall out of sync between Jamf and the Mac, preventing rotation.
+This is a possible cause of validation failures, not a diagnosis of a particular Mac.
+See [Apple's command](https://developer.apple.com/documentation/devicemanagement/setrecoverylockcommand)
+and [Jamf command history](https://developer.jamf.com/jamf-pro/reference/get_v2-mdm-commands).
+
+Review a blocked machine's command UUID, status/error, server version, current
+Recovery Lock knowledge and retained 1Password value. The following query exposes
+state metadata without passwords:
+
+```sql
+SELECT id, phase, command_uuid, requested_at, last_error,
+       password IS NOT NULL AS has_candidate,
+       password_opuuid IS NOT NULL AS has_secret
+FROM recovery_password_state
+WHERE phase <> 'stable'
+ORDER BY id;
 ```
 
-### Option 2: From Source
+After repairing the external state, resume a correlated rotation by setting its
+known `SET_RECOVERY_LOCK` UUID, actual request timestamp and `phase = 'pending'`.
+Keep its candidate and item mapping intact; the next run verifies acknowledgement
+and password equality. For an independently verified stable secret, retain the
+item mapping, clear the candidate, set `phase = 'stable'`, and record the actual
+confirmation time in `date` (RFC3339). Review and back up each affected row before
+editing it. There is no automatic reset of blocked state.
 
-1. Clone the repository:
+Both Jamf and 1Password access use maintained SDKs. Jamf uses current inventory V4
+and MDM V2 services (Jamf Pro 11.30 or later); narrow requests through its transport compensate for missing
+`newPassword` and response models in the pinned SDK. Authentication, refresh,
+pagination and transport policy remain SDK-owned. Command submission has retries
+disabled. The API role needs computer inventory, Recovery Lock read/send and MDM
+command-history permissions. 1Password needs read/create/update in the target vault.
 
-```bash
-git clone https://github.com/woodleighschool/SetRecoveryPassword.git
-cd SetRecoveryPassword
+## 🛠️ Development
+
+```sh
+mise install
+mise run deps
+mise run check
+mise run notices
+mise run container-check
 ```
 
-2. Install dependencies:
+State integration tests additionally use `RECOVERY_TEST_DATABASE_URL` pointing to
+an isolated local PostgreSQL database. They create a temporary schema and remove it
+afterward. Never point this setting at production.
 
-```bash
-pip3 install -r requirements.txt
-```
+## 📦 Releases
 
-3. Or install the package:
+Release Please preserves the existing version lineage. CI compiles the command;
+the shared Docker builder publishes signed images with SBOMs for `linux/amd64` and
+`linux/arm64` to `ghcr.io/woodleighschool/jamf-recovery-lock`. The distroless non-root
+image includes dependency notices. There is no standalone-binary release pipeline.
 
-```bash
-pip3 install .
-```
-
-### Option 3: Direct from GitHub
-
-```bash
-# Install latest release
-pip3 install git+https://github.com/woodleighschool/SetRecoveryPassword.git
-
-# Install specific version
-pip3 install git+https://github.com/woodleighschool/SetRecoveryPassword.git@v1.0.0
-```
-
-## Configuration
-
-The application uses environment variables for configuration:
-
-| Variable             | Description                                         | Required | Default                         |
-| -------------------- | --------------------------------------------------- | -------- | ------------------------------- |
-| `JAMF_HOST`          | Your Jamf Pro server hostname                       | Yes      | -                               |
-| `JAMF_CLIENT_ID`     | OAuth2 client ID                                    | Yes      | -                               |
-| `JAMF_CLIENT_SECRET` | OAuth2 client secret                                | Yes      | -                               |
-| `VAULT_ID`           | 1Password vault ID                                  | Yes      | -                               |
-| `ONEPASSWORD_TOKEN`  | 1Password service account token                     | Yes      | -                               |
-| `UPDATE_NOW`         | Run update immediately (`true`/`false`)             | No       | `false`                         |
-| `UPDATE_SCHEDULE`    | Cron schedule for updates                           | No       | `0 0 * * *` (daily at midnight) |
-| `DRY_RUN`            | Run without making changes (`true`/`false`)         | No       | `false`                         |
-| `DB_PATH`            | Path to the SQLite database file                    | No       | `./state.db`                    |
-| `LOG_LEVEL`          | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | No       | `INFO`                          |
-
-## Usage
-
-### Command Line
-
-```bash
-# Run once
-JAMF_HOST="jamf.example.com" \
-JAMF_CLIENT_ID="your-client-id" \
-JAMF_CLIENT_SECRET="your-client-secret" \
-VAULT_ID="your-vault-id" \
-ONEPASSWORD_TOKEN="your-token" \
-UPDATE_NOW=true \
-python3 setrecoverypassword.py
-
-# Run with scheduled updates (daily at 2 AM)
-JAMF_HOST="jamf.example.com" \
-JAMF_CLIENT_ID="your-client-id" \
-JAMF_CLIENT_SECRET="your-client-secret" \
-VAULT_ID="your-vault-id" \
-ONEPASSWORD_TOKEN="your-token" \
-UPDATE_SCHEDULE="0 2 * * *" \
-python3 setrecoverypassword.py
-
-# Dry run mode (test without making changes)
-JAMF_HOST="jamf.example.com" \
-JAMF_CLIENT_ID="your-client-id" \
-JAMF_CLIENT_SECRET="your-client-secret" \
-VAULT_ID="your-vault-id" \
-ONEPASSWORD_TOKEN="your-token" \
-DRY_RUN=true \
-UPDATE_NOW=true \
-python3 setrecoverypassword.py
-```
-
-### As an Installed Package
-
-```bash
-# After pip install
-JAMF_HOST="jamf.example.com" \
-JAMF_CLIENT_ID="your-client-id" \
-JAMF_CLIENT_SECRET="your-client-secret" \
-VAULT_ID="your-vault-id" \
-ONEPASSWORD_TOKEN="your-token" \
-setrecoverypassword
-```
-
-## Jamf Pro API Setup
-
-1. In Jamf Pro, go to Settings > System Settings > API Roles and Privileges
-2. Create a new role with the following privileges:
-    - Computers: Read, Update
-    - Recovery Lock Password: Read
-    - Send Computer Remote Command to Set Recovery Lock: Create
-3. Go to Settings > System Settings > API Integrations and Credentials
-4. Create a new API Client with the role created above
-5. Note the Client ID and Client Secret for configuration
-
-## 1Password Setup
-
-1. Create a service account in your 1Password account
-2. Grant the service account access to the vault where you want to store recovery passwords
-3. Generate a service account token
-4. Note the Vault ID and service account token for configuration
-
-## How It Works
-
-1. **Initial Setup**: The application fetches all managed macOS devices from Jamf Pro
-2. **Password Generation**: For new devices or expired passwords (>30 days), generates a random 10-character uppercase password
-3. **Jamf Integration**: Sends the new password to the device via Jamf's Set Recovery Lock command
-4. **Local Storage**: Temporarily stores the password in a local SQLite database
-5. **Verification**: Monitors Jamf Pro API until the new password is reflected in the system
-6. **1Password Storage**: Once verified, moves the password from local database to 1Password
-7. **Cleanup**: Removes the password from local storage, keeping only metadata
-
-## Password Rotation
-
--   Passwords are automatically rotated every 30+ days
--   The exact rotation time includes a random offset to distribute load
--   Grace period handling ensures proper synchronisation between Jamf and the application
--   Devices that fail to update passwords are retried with exponential backoff
-
-## Local Database Storage
-
-The application uses an SQLite database (`state.db`) to track:
-
--   Device IDs and passwords during transition
--   Password creation timestamps
--   1Password vault item UUIDs
--   Grace period counters for sync issues
+wood-ops consumes semantic version and digest pins. Its application rename and
+configuration update are managed separately; legacy backing secret and database
+identifiers can remain.

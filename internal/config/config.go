@@ -3,130 +3,70 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/spf13/viper"
+	"github.com/caarlos0/env/v11"
 )
 
+// Config is the environment configuration for one reconciliation run.
 type Config struct {
-	Name    string `mapstructure:"name"`
-	Version string `mapstructure:"version"`
-
-	InstanceDomain           string `mapstructure:"instance_domain"`
-	ClientID                 string `mapstructure:"client_id"`
-	ClientSecret             string `mapstructure:"client_secret"`
-	JamfID                   string `mapstructure:"jamf_id"`
-	AuthMethod               string `mapstructure:"auth_method"`
-	TokenRefreshBufferPeriod string `mapstructure:"token_refresh_buffer_period_seconds"`
-	TokenBufferPeriod        string `mapstructure:"token_buffer_period_seconds"`
-
-	OnePasswordToken string `mapstructure:"onepassword_token"`
-	VaultID          string `mapstructure:"onepassword_vault_id"`
-
-	DatabaseHost     string `mapstructure:"database_host"`
-	DatabasePort     string `mapstructure:"DatabasePort"`
-	DatabaseUsername string `mapstructure:"database_username"`
-	DatabasePassword string `mapstructure:"database_password"`
-
-	PasswordLength int    `mapstructure:"password_length"`
-	SyncSchedule   string `mapstructure:"sync_schedule"`
-	LogLevel       string `mapstructure:"log_level"`
-	DryRun         bool   `mapstructure:"dry_run"`
+	InstanceDomain   string `env:"INSTANCE_DOMAIN,required,notEmpty"`
+	ClientID         string `env:"CLIENT_ID,required,notEmpty"`
+	ClientSecret     string `env:"CLIENT_SECRET,required,notEmpty"`
+	JamfID           string `env:"JAMF_ID"`
+	OnePasswordToken string `env:"ONEPASSWORD_TOKEN,required,notEmpty"`
+	VaultID          string `env:"ONEPASSWORD_VAULT_ID,required,notEmpty"`
+	DatabaseHost     string `env:"DATABASE_HOST,required,notEmpty"`
+	DatabasePort     int    `env:"DATABASE_PORT" envDefault:"5432"`
+	DatabaseUsername string `env:"DATABASE_USERNAME,required,notEmpty"`
+	DatabasePassword string `env:"DATABASE_PASSWORD,required,notEmpty"`
+	// Keep the existing ten-character password and 31-day rotation defaults.
+	PasswordLength int           `env:"PASSWORD_LENGTH" envDefault:"10"`
+	RotationAge    time.Duration `env:"ROTATION_AGE" envDefault:"744h"`
+	// PendingAge alerts on an overdue command; it never triggers another rotation.
+	PendingAge time.Duration `env:"PENDING_AGE" envDefault:"168h"`
+	RunTimeout time.Duration `env:"RUN_TIMEOUT" envDefault:"30m"`
+	LogLevel   slog.Level    `env:"LOG_LEVEL" envDefault:"info"`
+	DryRun     bool          `env:"DRY_RUN" envDefault:"false"`
 }
 
 func Load() (*Config, error) {
-	v := viper.GetViper()
-
-	v.SetDefault("auth_method", "oauth2")
-	v.SetDefault("token_refresh_buffer_period_seconds", "5")
-	v.SetDefault("token_buffer_period_seconds", "10")
-	v.SetDefault("sync_schedule", "")
-	v.SetDefault("log_level", "info")
-	v.SetDefault("dry_run", false)
-
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	if err := env.Parse(&cfg); err != nil {
+		return nil, fmt.Errorf("configuration: %w", err)
 	}
-
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
-
 	return &cfg, nil
 }
 
-func (c *Config) validate() error {
-	var errors []string
-
-	validLogLevels := []string{"debug", "info", "warn", "error"}
-	levelValid := false
-	for _, level := range validLogLevels {
-		if strings.ToLower(c.LogLevel) == level {
-			levelValid = true
-			break
+func (c *Config) Validate() error {
+	if !strings.Contains(c.InstanceDomain, "://") {
+		c.InstanceDomain = "https://" + c.InstanceDomain
+	}
+	u, err := url.Parse(c.InstanceDomain)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return fmt.Errorf("INSTANCE_DOMAIN must be an HTTPS server URL or hostname")
+	}
+	c.InstanceDomain = strings.TrimRight(c.InstanceDomain, "/")
+	if c.DatabasePort < 1 || c.DatabasePort > 65535 {
+		return fmt.Errorf("DATABASE_PORT must be between 1 and 65535")
+	}
+	if c.PasswordLength < 1 {
+		return fmt.Errorf("PASSWORD_LENGTH must be positive")
+	}
+	if c.RotationAge <= 0 || c.PendingAge <= 0 || c.RunTimeout <= 0 {
+		return fmt.Errorf("ROTATION_AGE, PENDING_AGE and RUN_TIMEOUT must be positive durations")
+	}
+	if c.JamfID != "" {
+		id, e := strconv.Atoi(c.JamfID)
+		if e != nil || id <= 0 {
+			return fmt.Errorf("JAMF_ID must be a positive integer")
 		}
 	}
-	if !levelValid {
-		errors = append(errors, fmt.Sprintf("LOG_LEVEL must be one of: %s", strings.Join(validLogLevels, ", ")))
-	}
-
-	if c.SyncSchedule != "" {
-		parts := strings.Fields(c.SyncSchedule)
-		if len(parts) != 5 {
-			errors = append(errors, "SYNC_SCHEDULE must be a valid cron expression (5 fields) or empty for oneshot mode")
-		}
-	}
-
-	if c.InstanceDomain == "" {
-		errors = append(errors, "INSTANCE_DOMAIN is required")
-	} else {
-		if !strings.HasPrefix(c.InstanceDomain, "http://") && !strings.HasPrefix(c.InstanceDomain, "https://") {
-			c.InstanceDomain = "https://" + c.InstanceDomain
-		}
-	}
-
-	if c.ClientID == "" {
-		errors = append(errors, "CLIENT_ID is required")
-	}
-	if c.ClientSecret == "" {
-		errors = append(errors, "CLIENT_SECRET is required")
-	}
-
-	if c.OnePasswordToken == "" {
-		errors = append(errors, "ONEPASSWORD_TOKEN is required")
-	}
-	if c.VaultID == "" {
-		errors = append(errors, "ONEPASSWORD_VAULT_ID is required")
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf("validation errors:\n - %s", strings.Join(errors, "\n - "))
-	}
-
 	return nil
-}
-
-func (c *Config) GetLogLevel() slog.Level {
-	switch strings.ToLower(c.LogLevel) {
-	case "debug":
-		return slog.LevelDebug
-	case "info":
-		return slog.LevelInfo
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
-}
-
-func (c *Config) GetTimeout() time.Duration {
-	return 5 * time.Minute
-}
-
-func (c *Config) IsOneshot() bool {
-	return c.SyncSchedule == ""
 }

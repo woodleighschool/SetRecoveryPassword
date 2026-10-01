@@ -1,42 +1,26 @@
-# Go binaries
-*.exe
-*.exe~
-*.dll
-*.dylib
-
-# Test binary, built with `go test -c`
+# Go
+/jamf-recovery-lock
+/dist/
 *.test
-
-# Output of the go coverage tool
-*.out
-
-# Dependency directories
-vendor/
-
-# Go workspace files
+coverage.out
 go.work
 go.work.sum
 
-# Go module cache
-bin/
-pkg/
+# Local configuration
+.env
+.env.*
+!.env.example
+config.yaml
 
-# Build artifacts
-dist/
-build/
-tmp/
-/setrecoverypassword
+# Local Mise
+.mise.local.toml
+.mise.local.lock
 
 # macOS
 .DS_Store
 .AppleDouble
 .LSOverride
 ._*
-.Spotlight-V100
-.Trashes
-.AppleDB
-.AppleDesktop
-Network Trash Folder
-Temporary Items
-.apdisk
 
+# Generated dependency licenses
+/third_party_licenses/
