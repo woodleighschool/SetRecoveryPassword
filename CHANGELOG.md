@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/3.0.0...v3.1.0) (2026-10-03)
+
+
+### Features
+
+* **go:** update module golang.org/x/net (v0.49.0 → v0.55.0) [security] ([#51](https://github.com/woodleighschool/jamf-recovery-lock/issues/51)) ([a3bac1b](https://github.com/woodleighschool/jamf-recovery-lock/commit/a3bac1b60e6e9f80223eb308785bfaa5f97ff700))
+
+
+### Bug Fixes
+
+* **go:** update module resty.dev/v3 (v3.0.0-rc.3 → v3.0.0-rc.4) ([#52](https://github.com/woodleighschool/jamf-recovery-lock/issues/52)) ([7f6ef1b](https://github.com/woodleighschool/jamf-recovery-lock/commit/7f6ef1b018d6a2050cd402c173aaa32649cfab00))
+* reconcile recovery candidates from Jamf command history ([3ef1c03](https://github.com/woodleighschool/jamf-recovery-lock/commit/3ef1c03982d70ddc95db5b3b36d6624289d38cd8))
+* retain the 1Password SDK client during item operations ([d71d19c](https://github.com/woodleighschool/jamf-recovery-lock/commit/d71d19c9bb719a45850fe1b088af38d69b943fee))
+
 ## [3.0.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/2.0.4...3.0.0) (2026-10-01)
 
 
