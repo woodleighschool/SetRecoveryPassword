@@ -16,16 +16,17 @@ returned command UUID. Only an acknowledged `SET_RECOVERY_LOCK` command **and** 
 matching Jamf-reported password permit a 1Password update. The candidate remains in
 PostgreSQL until that update succeeds. Stable passwords rotate after 31 days.
 
-Pending or `NotNow` commands retain their candidate. Acknowledgement with stale
-inventory is checked again on later runs. After seven days without confirmation,
+Pending or `NotNow` commands retain their candidate. Other unsettled set commands
+must finish before a candidate without a UUID can be promoted. Acknowledgement
+with stale inventory is checked again on later runs. After seven days without confirmation,
 the run reports an overdue failure; it still never sends another candidate. A
 failed command enters `blocked`, retaining the candidate and the previous
 1Password secret. Unknown command history is treated as unconfirmed.
 
 Submission cannot be atomic across PostgreSQL and Jamf. A crash after saving
 `prepared`, an ambiguous submission response, or failure to save the returned UUID
-requires command-history review before repair. A session advisory lock prevents
-overlapping runs from submitting competing rotations.
+retains the candidate for command-history reconciliation. A session advisory lock
+prevents overlapping runs from submitting competing rotations.
 
 ## ⚙️ Configuration
 
@@ -50,9 +51,14 @@ external systems. There is no internal scheduler.
 
 The backing database remains `setrecoverypassword`, with table
 `recovery_password_state`. Startup upgrades its schema transactionally and
-idempotently. Stable rows and 1Password IDs survive unchanged. Legacy candidates
-without a command UUID enter `blocked` because their success cannot be established
-from inventory alone. Dry-run reads the old schema without migrating it.
+idempotently. Stable rows and 1Password IDs survive unchanged. Candidates without
+a command UUID, including legacy rows already marked `blocked`, are reconciled
+on every run. Unsettled set commands keep the candidate pending. Once all set
+commands are settled, the uniquely latest command must be acknowledged and Jamf
+must report the retained candidate before its UUID is persisted and 1Password is
+updated. A recorded preparation time excludes earlier commands; legacy grace-check
+dates cannot identify a submission. Incomplete or ambiguous history and failed
+commands retain the candidate for repair. Dry-run reads the old schema without migrating it.
 
 ## 🔎 Recovery failures
 
@@ -83,7 +89,8 @@ Keep its candidate and item mapping intact; the next run verifies acknowledgemen
 and password equality. For an independently verified stable secret, retain the
 item mapping, clear the candidate, set `phase = 'stable'`, and record the actual
 confirmation time in `date` (RFC3339). Review and back up each affected row before
-editing it. There is no automatic reset of blocked state.
+editing it. A failed tracked command remains blocked; candidates without a UUID
+continue checking for recoverable command evidence.
 
 Both Jamf and 1Password access use maintained SDKs. Jamf uses current inventory V4
 and MDM V2 services (Jamf Pro 11.30 or later); narrow requests through its transport compensate for missing

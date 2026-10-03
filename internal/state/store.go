@@ -37,7 +37,7 @@ type Entry struct {
 type Store struct{ conn *pgx.Conn }
 
 // Migrate keeps the deployed table identity and upgrades it atomically.
-// Old candidates have no trustworthy command correlation and require review.
+// Old candidates stay unconfirmed until command history establishes their submission.
 func Migrate(ctx context.Context, conn *pgx.Conn) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {

@@ -32,6 +32,7 @@ type Command struct {
 	Type   string
 	Status string
 	Detail string
+	SentAt time.Time
 }
 
 type Client struct{ sdk *jamfpro.Client }
@@ -150,7 +151,7 @@ func (c *Client) commands(ctx context.Context, device Device, commandUUID string
 		}
 		filter += ";uuid==" + commandUUID
 	} else {
-		filter += ";command=in=(SET_RECOVERY_LOCK,VALIDATE_RECOVERY_LOCK,VERIFY_RECOVERY_LOCK)"
+		filter += ";command=in=(SET_RECOVERY_LOCK,VERIFY_RECOVERY_LOCK)"
 	}
 	var records []commandRecord
 	resp, err := c.sdk.GetTransport().NewRequest(ctx).SetHeader("Accept", constants.ApplicationJSON).
@@ -166,16 +167,27 @@ func (c *Client) commands(ctx context.Context, device Device, commandUUID string
 	if err != nil {
 		return nil, requestError(ctx, "read recovery command history", resp, err)
 	}
+	var envelope struct {
+		TotalCount *int `json:"totalCount"`
+	}
+	if resp == nil || json.Unmarshal(resp.Bytes(), &envelope) != nil || envelope.TotalCount == nil || *envelope.TotalCount != len(records) {
+		return nil, errors.New("jamf returned incomplete recovery command history")
+	}
 	commands := make([]Command, 0, len(records))
+	seen := make(map[string]bool, len(records))
 	for _, record := range records {
 		if uuid.Validate(record.UUID) != nil || (commandUUID != "" && record.UUID != commandUUID) {
 			return nil, errors.New("jamf returned an unexpected command UUID")
 		}
+		if seen[record.UUID] {
+			return nil, errors.New("jamf returned duplicate command UUIDs")
+		}
+		seen[record.UUID] = true
 		if record.Client != nil && record.Client.ManagementID != device.ManagementID {
 			return nil, errors.New("jamf returned a command for another device")
 		}
 		switch record.CommandType {
-		case mdm.CommandTypeSetRecoveryLock, mdm.CommandTypeValidateRecoveryLock, "VERIFY_RECOVERY_LOCK":
+		case mdm.CommandTypeSetRecoveryLock, "VERIFY_RECOVERY_LOCK":
 		default:
 			return nil, errors.New("jamf returned an unexpected recovery command type")
 		}
@@ -194,7 +206,15 @@ func (c *Client) commands(ctx context.Context, device Device, commandUUID string
 				detail = "The provided recovery password failed to validate."
 			}
 		}
-		commands = append(commands, Command{UUID: record.UUID, Type: record.CommandType, Status: status, Detail: detail})
+		var sentAt time.Time
+		if record.DateSent != "" {
+			var parseErr error
+			sentAt, parseErr = time.Parse(time.RFC3339Nano, record.DateSent)
+			if parseErr != nil {
+				return nil, errors.New("jamf returned an invalid command submission timestamp")
+			}
+		}
+		commands = append(commands, Command{UUID: record.UUID, Type: record.CommandType, Status: status, Detail: detail, SentAt: sentAt})
 	}
 	return commands, nil
 }

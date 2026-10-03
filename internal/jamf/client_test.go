@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -167,6 +168,9 @@ func TestCommandStatesAndIdentity(t *testing.T) {
 func TestCommandsExposeOtherPendingRotation(t *testing.T) {
 	var writes atomic.Int32
 	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("filter"); got != "clientManagementId=="+managementID+";command=in=(SET_RECOVERY_LOCK,VERIFY_RECOVERY_LOCK)" {
+			t.Errorf("unsupported recovery history filter: %s", got)
+		}
 		if r.Method == http.MethodPost {
 			writes.Add(1)
 		}
@@ -215,5 +219,94 @@ func TestQueueDoesNotReplayAfterResponseLoss(t *testing.T) {
 	}
 	if writes.Load() != 1 {
 		t.Fatalf("ambiguous command replayed %d times", writes.Load())
+	}
+}
+
+func TestCommandRetainsSubmissionTimestamp(t *testing.T) {
+	for _, tc := range []struct {
+		timestamp string
+		fail      bool
+	}{
+		{timestamp: "2026-10-01T00:00:00.123Z"},
+		{timestamp: ""},
+		{timestamp: "not-a-date", fail: true},
+	} {
+		t.Run(tc.timestamp, func(t *testing.T) {
+			client := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"totalCount":1,"results":[{"uuid":%q,"commandType":"SET_RECOVERY_LOCK","commandState":"ACKNOWLEDGED","dateSent":%q}]}`, commandID, tc.timestamp)
+			})
+			command, err := client.Command(t.Context(), testDevice, commandID)
+			if (err != nil) != tc.fail {
+				t.Fatalf("command=%+v err=%v", command, err)
+			}
+			if err == nil && command.SentAt.IsZero() != (tc.timestamp == "") {
+				t.Fatal("lost command timestamp")
+			}
+		})
+	}
+}
+
+func TestCommandHistoryMustBeCompleteAndUnique(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		total     int
+		duplicate bool
+		fail      bool
+	}{
+		{name: "complete", total: 2},
+		{name: "incomplete", total: 3, fail: true},
+		{name: "duplicate", total: 2, duplicate: true, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				second := "cccccccc-3f1e-4b3a-a5b3-ca0cd7430937"
+				if tc.duplicate {
+					second = commandID
+				}
+				_, _ = fmt.Fprintf(w, `{"totalCount":%d,"results":[{"uuid":%q,"commandType":"SET_RECOVERY_LOCK","commandState":"ACKNOWLEDGED"},{"uuid":%q,"commandType":"SET_RECOVERY_LOCK","commandState":"PENDING"}]}`, tc.total, commandID, second)
+			})
+			_, err := client.Commands(t.Context(), testDevice)
+			if (err != nil) != tc.fail {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
+func TestCommandHistoryIncludesUnsettledCommandsOnLaterPages(t *testing.T) {
+	var pages []string
+	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		size, err := strconv.Atoi(r.URL.Query().Get("page-size"))
+		if err != nil || size < 1 {
+			t.Error("missing pagination size")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var records []map[string]string
+		if page == "0" {
+			for i := range size {
+				records = append(records, map[string]string{
+					"uuid":         fmt.Sprintf("%08x-3f1e-4b3a-a5b3-ca0cd7430937", i+1),
+					"commandType":  "SET_RECOVERY_LOCK",
+					"commandState": "ACKNOWLEDGED",
+				})
+			}
+		} else {
+			records = append(records, map[string]string{
+				"uuid": commandID, "commandType": "SET_RECOVERY_LOCK", "commandState": "PENDING",
+			})
+		}
+		if err := json.NewEncoder(w).Encode(map[string]any{"totalCount": size + 1, "results": records}); err != nil {
+			t.Error(err)
+		}
+	})
+	commands, err := client.Commands(t.Context(), testDevice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(pages, ",") != "0,1" || len(commands) < 2 || commands[len(commands)-1].Status != "pending" {
+		t.Fatal("later pending command omitted from history")
 	}
 }

@@ -92,9 +92,12 @@ func (s *Service) reconcile(ctx context.Context, d jamf.Device, now time.Time) (
 		e = &state.Entry{ID: d.ID, Date: now.Format(time.RFC3339), Phase: state.Stable}
 		return s.rotate(ctx, d, e, now)
 	}
+	if e.CommandUUID == "" && e.Password != nil && (e.Phase == state.Prepared || e.Phase == state.Pending || e.Phase == state.Blocked) {
+		return s.correlate(ctx, d, e, now)
+	}
 	switch e.Phase {
 	case state.Prepared:
-		return s.block(ctx, e, "rotation submission is uncertain; correlate Jamf history before repair")
+		return s.block(ctx, e, "prepared row has invalid candidate or command state")
 	case state.Blocked:
 		return "blocked", fmt.Errorf("rotation blocked (command %s): %s", e.CommandUUID, e.LastError)
 	case state.Pending:
@@ -173,6 +176,88 @@ func (s *Service) rotate(ctx context.Context, d jamf.Device, e *state.Entry, now
 	return "queued", nil
 }
 
+// correlate recovers submission evidence without sending another candidate.
+// Legacy dates were also grace-check timestamps, so they cannot identify a command.
+func (s *Service) correlate(ctx context.Context, d jamf.Device, e *state.Entry, now time.Time) (string, error) {
+	if *e.Password == "" {
+		return s.block(ctx, e, "unconfirmed rotation has an empty candidate")
+	}
+	commands, err := s.Jamf.Commands(ctx, d)
+	if err != nil {
+		return "pending", fmt.Errorf("recover command evidence: %w", err)
+	}
+	var latest *jamf.Command
+	unsettled := false
+	missingTime := false
+	latestCount := 0
+	for i := range commands {
+		command := &commands[i]
+		if command.Type != "SET_RECOVERY_LOCK" {
+			continue
+		}
+		if command.Status == "pending" || command.Status == "unknown" {
+			unsettled = true
+		}
+		if command.SentAt.IsZero() {
+			missingTime = true
+			continue
+		}
+		if latest == nil || command.SentAt.After(latest.SentAt) {
+			latest = command
+			latestCount = 1
+		} else if command.SentAt.Equal(latest.SentAt) {
+			latestCount++
+		}
+	}
+	if unsettled {
+		return s.awaitCorrelation(ctx, d, e, now, "recovery set commands remain unsettled")
+	}
+	if latest == nil || missingTime || latestCount != 1 {
+		return s.block(ctx, e, "recovery command history cannot identify the latest set command; candidate retained")
+	}
+	if e.RequestedAt != nil && latest.SentAt.Before(*e.RequestedAt) {
+		return s.block(ctx, e, "latest set command predates the prepared candidate; submission remains unconfirmed")
+	}
+	if latest.Status == "failed" {
+		return s.block(ctx, e, fmt.Sprintf("latest SET_RECOVERY_LOCK %s failed: %s", latest.UUID, redactError(latest.Detail, *e.Password)))
+	}
+	if latest.Status != "acknowledged" {
+		return s.block(ctx, e, "latest set command is not acknowledged; candidate retained")
+	}
+	password, err := s.Jamf.Password(ctx, d)
+	if err != nil {
+		return "pending", err
+	}
+	if password != *e.Password {
+		return s.awaitCorrelation(ctx, d, e, now, "acknowledged set command does not yet confirm the retained candidate")
+	}
+	e.CommandUUID = latest.UUID
+	e.RequestedAt = &latest.SentAt
+	e.Phase = state.Pending
+	e.LastError = ""
+	if !s.Config.DryRun {
+		if err := s.Store.Save(ctx, e); err != nil {
+			return "pending", fmt.Errorf("persist recovered command evidence: %w", err)
+		}
+	}
+	s.Logger.InfoContext(ctx, "rotation command evidence recovered", "device_id", d.ID, "command_uuid", latest.UUID, "requested_at", latest.SentAt, "dry_run", s.Config.DryRun)
+	return s.promote(ctx, d, e, now)
+}
+
+func (s *Service) awaitCorrelation(ctx context.Context, d jamf.Device, e *state.Entry, now time.Time, reason string) (string, error) {
+	s.Logger.InfoContext(ctx, "rotation awaiting command correlation", "device_id", d.ID, "reason", reason)
+	retained := e.RequestedAt
+	if retained == nil {
+		if date, err := parseDate(e.Date); err == nil {
+			retained = &date
+		}
+	}
+	if retained != nil && now.Sub(*retained) > s.Config.PendingAge {
+		return "pending", fmt.Errorf("%s; candidate retained since at least %s", reason, retained.Format(time.RFC3339))
+	}
+	return "pending", nil
+}
+
 func (s *Service) pending(ctx context.Context, d jamf.Device, e *state.Entry, now time.Time) (string, error) {
 	if e.Password == nil || *e.Password == "" || e.CommandUUID == "" || e.RequestedAt == nil {
 		return s.block(ctx, e, "pending row is missing candidate, command UUID or request timestamp")
@@ -245,7 +330,10 @@ func (s *Service) block(ctx context.Context, e *state.Entry, reason string) (str
 			return "blocked", fmt.Errorf("%s; persist blocked state: %w", reason, err)
 		}
 	}
-	return "blocked", fmt.Errorf("%s (command %s)", reason, e.CommandUUID)
+	if e.CommandUUID != "" {
+		reason += " (command " + e.CommandUUID + ")"
+	}
+	return "blocked", fmt.Errorf("%s", reason)
 }
 
 func parseDate(value string) (time.Time, error) {

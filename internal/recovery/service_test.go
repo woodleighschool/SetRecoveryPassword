@@ -199,7 +199,7 @@ func TestSubmissionRequiresDurableCandidate(t *testing.T) {
 	}
 }
 
-func TestPreparedAndLegacyRowsNeverQueueAutomatically(t *testing.T) {
+func TestUncorrelatedRowsWithoutCommandEvidenceNeverQueue(t *testing.T) {
 	now := time.Now().UTC()
 	for _, phase := range []string{state.Prepared, state.Blocked, "corrupt"} {
 		t.Run(phase, func(t *testing.T) {
@@ -367,5 +367,151 @@ func TestEmptyCandidateCannotBePromoted(t *testing.T) {
 	_, err := svc.reconcile(t.Context(), j.devices[0], now)
 	if err == nil || op.updates != 0 || store.entries[1].Phase != state.Blocked {
 		t.Fatal("empty candidate promoted")
+	}
+}
+
+func TestUncorrelatedCandidateRecoversFromSuccessfulSettledHistory(t *testing.T) {
+	now := time.Now().UTC()
+	for _, phase := range []string{state.Prepared, state.Blocked, state.Pending} {
+		t.Run(phase, func(t *testing.T) {
+			e := pendingEntry(now)
+			e.Phase = phase
+			e.CommandUUID = ""
+			e.RequestedAt = nil
+			svc, store, j, op := fixture(e)
+			j.password = "candidate"
+			j.history = []jamf.Command{{UUID: "completed", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: now.Add(-time.Hour)}}
+			result, err := svc.reconcile(t.Context(), j.devices[0], now)
+			if err != nil || result != "promoted" || store.entries[1].Phase != state.Stable || store.entries[1].CommandUUID != "completed" || store.entries[1].RequestedAt == nil || op.password != "candidate" || j.queues != 0 {
+				t.Fatalf("result=%s err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestUncorrelatedCandidateRequiresSettledMatchingLatestSetCommand(t *testing.T) {
+	now := time.Now().UTC()
+	completed := jamf.Command{UUID: "completed", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: now.Add(-time.Hour)}
+	for _, tc := range []struct {
+		name, password string
+		history        []jamf.Command
+		pending        bool
+	}{
+		{name: "pending despite matching inventory", password: "candidate", history: []jamf.Command{{UUID: "waiting", Type: "SET_RECOVERY_LOCK", Status: "pending", SentAt: now.Add(-time.Minute)}}, pending: true},
+		{name: "older pending cannot overwrite after promotion", password: "candidate", history: []jamf.Command{completed, {UUID: "waiting", Type: "SET_RECOVERY_LOCK", Status: "pending", SentAt: now.Add(-2 * time.Hour)}}, pending: true},
+		{name: "unknown command", password: "candidate", history: []jamf.Command{{UUID: "unknown", Type: "SET_RECOVERY_LOCK", Status: "unknown", SentAt: now}}, pending: true},
+		{name: "failed latest command", password: "candidate", history: []jamf.Command{completed, {UUID: "failed", Type: "SET_RECOVERY_LOCK", Status: "failed", SentAt: now}}},
+		{name: "different reported password", password: "other", history: []jamf.Command{completed}, pending: true},
+		{name: "no set history", password: "candidate"},
+		{name: "verification acknowledgement is not password proof", password: "candidate", history: []jamf.Command{{UUID: "verify", Type: "VERIFY_RECOVERY_LOCK", Status: "acknowledged", SentAt: now}}},
+		{name: "missing submission time", password: "candidate", history: []jamf.Command{{UUID: "completed", Type: "SET_RECOVERY_LOCK", Status: "acknowledged"}}},
+		{name: "ambiguous newest command", password: "candidate", history: []jamf.Command{completed, {UUID: "other", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: completed.SentAt}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := pendingEntry(now)
+			e.Phase = state.Blocked
+			e.CommandUUID = ""
+			e.RequestedAt = nil
+			e.Date = now.Add(-time.Hour).Format(time.RFC3339)
+			svc, store, j, op := fixture(e)
+			j.password = tc.password
+			j.history = tc.history
+			result, err := svc.reconcile(t.Context(), j.devices[0], now)
+			if tc.pending {
+				if result != "pending" || err != nil {
+					t.Fatalf("result=%s err=%v", result, err)
+				}
+			} else if result != "blocked" || err == nil {
+				t.Fatalf("result=%s err=%v", result, err)
+			}
+			if op.updates != 0 || op.creates != 0 || j.queues != 0 || store.entries[1].Password == nil || store.entries[1].CommandUUID != "" {
+				t.Fatal("uncorrelated candidate changed a secret or queued a rotation")
+			}
+		})
+	}
+}
+
+func TestUncorrelatedCandidateRetriesEvidenceAndPersistsBeforePromotion(t *testing.T) {
+	now := time.Now().UTC()
+	e := pendingEntry(now)
+	e.Phase = state.Prepared
+	e.CommandUUID = ""
+	requested := now.Add(-2 * time.Minute)
+	e.RequestedAt = &requested
+	svc, store, j, op := fixture(e)
+	j.preflightErr = errors.New("history unavailable")
+	if _, err := svc.reconcile(t.Context(), j.devices[0], now); err == nil || store.saves != 0 {
+		t.Fatal("history outage changed durable state")
+	}
+	j.preflightErr = nil
+	j.history = []jamf.Command{{UUID: "completed", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: now.Add(-time.Minute)}}
+	j.password = "candidate"
+	store.failSave = true
+	if _, err := svc.reconcile(t.Context(), j.devices[0], now); err == nil || op.updates != 0 {
+		t.Fatal("promotion started without durable command evidence")
+	}
+	store.failSave = false
+	result, err := svc.reconcile(t.Context(), j.devices[0], now)
+	if err != nil || result != "promoted" || j.queues != 0 {
+		t.Fatalf("result=%s err=%v", result, err)
+	}
+}
+
+func TestPreparedCandidateCannotAdoptAnEarlierRotation(t *testing.T) {
+	now := time.Now().UTC()
+	e := pendingEntry(now)
+	e.Phase = state.Prepared
+	e.CommandUUID = ""
+	svc, _, j, op := fixture(e)
+	j.password = "candidate"
+	j.history = []jamf.Command{{UUID: "earlier", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: now.Add(-time.Hour)}}
+	if _, err := svc.reconcile(t.Context(), j.devices[0], now); err == nil || op.updates != 0 || j.queues != 0 {
+		t.Fatal("earlier command used to confirm a newer candidate")
+	}
+}
+
+func TestUncorrelatedDryRunAndPromotionRetryPreserveCandidate(t *testing.T) {
+	now := time.Now().UTC()
+	e := pendingEntry(now)
+	e.Phase = state.Blocked
+	e.CommandUUID = ""
+	e.RequestedAt = nil
+	svc, store, j, op := fixture(e)
+	j.password = "candidate"
+	j.history = []jamf.Command{{UUID: "completed", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: now.Add(-time.Minute)}}
+	svc.Config.DryRun = true
+	result, err := svc.reconcile(t.Context(), j.devices[0], now)
+	if err != nil || result != "would-change" || store.saves != 0 || op.updates != 0 || j.queues != 0 {
+		t.Fatalf("dry run result=%s err=%v", result, err)
+	}
+	svc.Config.DryRun = false
+	op.err = errors.New("vault unavailable")
+	j.status = "acknowledged"
+	if _, err := svc.reconcile(t.Context(), j.devices[0], now); err == nil || store.entries[1].Password == nil || store.entries[1].CommandUUID != "completed" {
+		t.Fatal("failed secret write lost recovered command evidence")
+	}
+	op.err = nil
+	result, err = svc.reconcile(t.Context(), j.devices[0], now)
+	if err != nil || result != "promoted" || j.queues != 0 {
+		t.Fatalf("retry result=%s err=%v", result, err)
+	}
+}
+
+func TestUncorrelatedCandidateRechecksFailedEvidenceOnLaterRuns(t *testing.T) {
+	now := time.Now().UTC()
+	e := pendingEntry(now)
+	e.Phase = state.Blocked
+	e.CommandUUID = ""
+	e.RequestedAt = nil
+	svc, store, j, op := fixture(e)
+	j.history = []jamf.Command{{UUID: "failed", Type: "SET_RECOVERY_LOCK", Status: "failed", SentAt: now.Add(-time.Hour)}}
+	if _, err := svc.reconcile(t.Context(), j.devices[0], now); err == nil || store.entries[1].CommandUUID != "" || op.updates != 0 {
+		t.Fatal("failed evidence incorrectly confirmed a candidate")
+	}
+	j.history = []jamf.Command{{UUID: "repaired", Type: "SET_RECOVERY_LOCK", Status: "acknowledged", SentAt: now}}
+	j.password = "candidate"
+	result, err := svc.reconcile(t.Context(), j.devices[0], now.Add(time.Hour))
+	if err != nil || result != "promoted" || j.queues != 0 {
+		t.Fatalf("result=%s err=%v", result, err)
 	}
 }
