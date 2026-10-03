@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +23,8 @@ type itemsAPI interface {
 }
 
 type Client struct {
+	// The SDK finalizer releases the client; its item API does not retain it.
+	sdk     *onepassword.Client
 	items   itemsAPI
 	vaultID string
 }
@@ -31,10 +34,11 @@ func NewClient(ctx context.Context, cfg *config.Config, version string, _ *slog.
 	if err != nil {
 		return nil, safeError(ctx, "initialize client", err)
 	}
-	return &Client{items: client.Items(), vaultID: cfg.VaultID}, nil
+	return &Client{sdk: client, items: client.Items(), vaultID: cfg.VaultID}, nil
 }
 
 func (c *Client) GetSecret(ctx context.Context, itemID string) (string, error) {
+	defer runtime.KeepAlive(c.sdk)
 	item, err := c.items.Get(ctx, c.vaultID, itemID)
 	if err != nil {
 		return "", safeError(ctx, "read item", err)
@@ -47,6 +51,7 @@ func (c *Client) GetSecret(ctx context.Context, itemID string) (string, error) {
 }
 
 func (c *Client) CreateSecret(ctx context.Context, device jamf.Device, value string) (string, error) {
+	defer runtime.KeepAlive(c.sdk)
 	// Recover a successful create whose UUID was not persisted before a crash.
 	// Stable tags survive a device rename; legacy titles preserve prior items.
 	deviceTag := "jamf-computer-id:" + strconv.Itoa(device.ID)
@@ -92,6 +97,7 @@ func (c *Client) CreateSecret(ctx context.Context, device jamf.Device, value str
 }
 
 func (c *Client) UpdateSecret(ctx context.Context, itemID, value string) error {
+	defer runtime.KeepAlive(c.sdk)
 	item, err := c.items.Get(ctx, c.vaultID, itemID)
 	if err != nil {
 		return safeError(ctx, "read item for update", err)
