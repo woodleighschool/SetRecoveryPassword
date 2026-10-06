@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.1.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/3.0.0...v3.1.0) (2026-10-03)
+## [3.1.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/v3.0.0...v3.1.0) (2026-10-03)
 
 
 ### Features
@@ -14,7 +14,7 @@
 * reconcile recovery candidates from Jamf command history ([3ef1c03](https://github.com/woodleighschool/jamf-recovery-lock/commit/3ef1c03982d70ddc95db5b3b36d6624289d38cd8))
 * retain the 1Password SDK client during item operations ([d71d19c](https://github.com/woodleighschool/jamf-recovery-lock/commit/d71d19c9bb719a45850fe1b088af38d69b943fee))
 
-## [3.0.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/2.0.4...3.0.0) (2026-10-01)
+## [3.0.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/v2.0.4...v3.0.0) (2026-10-01)
 
 
 ### ⚠ BREAKING CHANGES
