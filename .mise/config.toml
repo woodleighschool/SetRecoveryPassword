@@ -1,5 +1,5 @@
 [tools]
-go = "1.27.1"
+go = "1.27.2"
 "go:github.com/google/go-licenses/v2" = "v2.0.1"
 "go:golang.org/x/vuln/cmd/govulncheck" = "v1.8.0"
 golangci-lint = "2.14.0"
@@ -71,7 +71,10 @@ run = [
 
 [tasks.container-check]
 description = "Build the production container locally"
-run = "docker build --check . && docker build -t jamf-recovery-lock:local ."
+run = '''
+docker build --check --build-arg GO_VERSION="$(mise config get tools.go)" --build-arg GO_LICENSES_VERSION="$(mise tool go:github.com/google/go-licenses/v2 --requested)" .
+docker build --build-arg GO_VERSION="$(mise config get tools.go)" --build-arg GO_LICENSES_VERSION="$(mise tool go:github.com/google/go-licenses/v2 --requested)" -t jamf-recovery-lock:local .
+'''
 
 [tasks.check]
 description = "Run local CI checks"
