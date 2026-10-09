@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/woodleighschool/jamf-recovery-lock/compare/v3.1.0...v3.1.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **build:** unify Go toolchain and license tool versions ([a18e2ac](https://github.com/woodleighschool/jamf-recovery-lock/commit/a18e2ac0fc9cc91e677f0be0c145bc7f72c87c61))
+
 ## [3.1.0](https://github.com/woodleighschool/jamf-recovery-lock/compare/v3.0.0...v3.1.0) (2026-10-03)
 
 
